@@ -3,17 +3,17 @@
 {% block head %}
 <style>
   .tplgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;}
-  .tplcard{display:block;border:2px solid #e2e8f0;border-radius:16px;padding:20px 16px;text-align:center;
-           text-decoration:none;color:inherit;background:#fff;transition:all .15s;}
-  .tplcard:hover{border-color:var(--brand);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.08);}
-  .tplcard .emoji{font-size:42px;display:block;margin-bottom:10px;}
-  .tplcard b{font-size:17px;display:block;margin-bottom:6px;}
-  .tplcard span{font-size:13px;color:#64748b;}
+  .tplcard{display:block;border:1px solid var(--line);border-radius:var(--radius);padding:22px 16px;text-align:center;
+           text-decoration:none;color:inherit;background:var(--surface);transition:border-color .15s, transform .15s;}
+  .tplcard:hover{border-color:rgba(0,168,132,.55);transform:translateY(-2px);}
+  .tplcard .emoji{font-size:40px;display:block;margin-bottom:12px;}
+  .tplcard b{font-size:16.5px;display:block;margin-bottom:6px;letter-spacing:-.01em;}
+  .tplcard span{font-size:13px;color:var(--muted);line-height:1.5;display:block;}
 </style>
 {% endblock %}
 {% block content %}
 {% with step=0 %}{% include "dash_steps.html" %}{% endwith %}
-<div class="pagehead"><div><h1>What best describes you? 🤔</h1><p>Step 0 of 6 — pick the bot that fits your work. Everything after this adapts.</p></div></div>
+<div class="pagehead"><div><h1>What best describes you?</h1><p>Step 0 of 6 — pick the bot that fits your work. Everything after this adapts.</p></div></div>
 {% if error %}<div class="formerror">{{ error }}</div>{% endif %}
 <div class="tplgrid">
   {% for tpl in templates %}

@@ -3,14 +3,14 @@
    confirm, and up/down reordering — all backed by the JSON API under
    /app/api. Vanilla JS, no dependencies. #}
 <style>
-  .mb-cat{background:#fff; border:1px solid var(--line); border-radius:var(--radius);
-          padding:16px; margin-bottom:14px; box-shadow:0 1px 3px rgba(15,23,42,.08);}
-  .mb-cathead{display:flex; align-items:center; gap:10px; margin-bottom:10px;}
+  .mb-cat{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+          padding:16px; margin-bottom:14px;}
+  .mb-cathead{display:flex; align-items:center; gap:10px; margin-bottom:6px;}
   .mb-cathead .emoji{font-size:26px;}
   .mb-cathead .names{flex:1; min-width:0;}
-  .mb-cathead .names b{font-size:17px;}
+  .mb-cathead .names b{font-size:16.5px;}
   .mb-cathead .names small{display:block; color:var(--muted); font-size:12.5px;}
-  .mb-item{display:flex; align-items:flex-start; gap:10px; padding:10px 4px;
+  .mb-item{display:flex; align-items:flex-start; gap:10px; padding:12px 4px;
            border-top:1px solid var(--line);}
   .mb-item .vegdot{font-size:13px; margin-top:3px;}
   .mb-item .info{flex:1; min-width:0;}
@@ -18,16 +18,19 @@
   .mb-item .info .hi{color:var(--muted); font-size:13px;}
   .mb-item .info .desc{color:var(--muted); font-size:13px; margin-top:2px;}
   .mb-item .price{font-weight:800; white-space:nowrap; font-size:15px;}
-  .mb-item .ops{display:flex; gap:4px; flex-wrap:wrap;}
-  .mb-form{background:#f8fafc; border:1px dashed #cbd5e1; border-radius:10px;
-           padding:12px; margin-top:10px;}
-  .mb-form h4{margin:0 0 8px; font-size:14px;}
-  .mb-form .grid{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+  .mb-item .ops{display:flex; gap:6px; flex-wrap:wrap;}
+  .mb-form{background:var(--surface-2); border:1px dashed var(--line-strong); border-radius:8px;
+           padding:14px; margin-top:10px;}
+  .mb-form h4{margin:0 0 10px; font-size:14px;}
+  .mb-form .grid{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
   @media(max-width:560px){ .mb-form .grid{grid-template-columns:1fr;} }
-  .mb-form input,.mb-form select{margin-top:4px; padding:10px 12px; font-size:14px;}
-  .mb-edit{background:#fffbeb; border:1px solid #fde68a; border-radius:10px;
-           padding:12px; margin-top:8px;}
-  #mb-addcat{background:#fff; border:2px dashed #cbd5e1;}
+  .mb-form label{font-size:13.5px; font-weight:600;}
+  .mb-form input,.mb-form select{margin-top:5px; padding:11px 12px; font-size:14px;}
+  .mb-edit{background:rgba(251,191,36,.06); border:1px solid rgba(251,191,36,.35); border-radius:8px;
+           padding:14px; margin-top:8px;}
+  .mb-edit h4{margin:0 0 10px; font-size:14px;}
+  .mb-edit label{font-size:13.5px; font-weight:600;}
+  #mb-addcat{background:transparent; border:1px dashed var(--line-strong);}
   #mb-addcat.open{border-style:solid; border-color:var(--brand);}
 </style>
 

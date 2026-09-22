@@ -12,9 +12,9 @@
 </div>
 
 <div class="tiles">
-  <div class="tile"><b>{{ bookings }}</b><span>📅 bookings</span></div>
-  <div class="tile"><b>{{ unhandled }}</b><span>🙋 handoff alerts</span></div>
-  <div class="tile"><b>{{ messages }}</b><span>💬 messages</span></div>
+  <div class="tile"><b>{{ bookings }}</b><span>bookings</span></div>
+  <div class="tile"><b>{{ unhandled }}</b><span>handoff alerts</span></div>
+  <div class="tile"><b>{{ messages }}</b><span>messages</span></div>
 </div>
 
 <div class="card">
@@ -29,7 +29,7 @@
 </div>
 
 <div class="card">
-  <h2>📅 Recent bookings</h2>
+  <h2>Recent bookings</h2>
   {% if bookings_list %}
   <div class="tablewrap">
   <table class="tbl">
@@ -52,7 +52,7 @@
 </div>
 
 <div class="card">
-  <h2>🙋 Alerts <span class="muted" style="font-weight:400; font-size:13px;">(handoff requests & order enquiries)</span></h2>
+  <h2>Alerts <span class="muted" style="font-weight:400; font-size:13px;">(handoff requests & order enquiries)</span></h2>
   {% if alerts %}
     {% for a in alerts %}
     <div class="alert">
@@ -64,7 +64,7 @@
     </div>
     {% endfor %}
   {% else %}
-  <p class="empty">No handoff requests. The bot is handling everything. 🎉</p>
+  <p class="empty">No handoff requests. The bot is handling everything.</p>
   {% endif %}
 </div>
 {% endblock %}

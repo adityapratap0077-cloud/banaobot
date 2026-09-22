@@ -2,7 +2,7 @@
 {% block title %}{{ biz.name }} · Welcome{% endblock %}
 {% block content %}
 {% with step=5 %}{% include "dash_steps.html" %}{% endwith %}
-<div class="pagehead"><div><h1>Welcome message 🎉</h1><p>Step 5 of 6 — the first thing customers see. Then you're live!</p></div></div>
+<div class="pagehead"><div><h1>Welcome message</h1><p>Step 5 of 6 — the first thing customers see. Then you're live!</p></div></div>
 <div class="card">
   <form method="post">
     <label class="f">Welcome (English)
@@ -12,7 +12,7 @@
     <label class="f">Welcome (Hindi)
       <textarea name="welcome_hi" rows="5">{{ default_hi }}</textarea>
     </label>
-    <button class="btn block" type="submit">🚀 Finish — activate my bot</button>
+    <button class="btn block" type="submit">Finish — activate my bot</button>
   </form>
 </div>
 {% endblock %}

@@ -2,7 +2,7 @@
 {% block title %}{{ biz.name }} · Details{% endblock %}
 {% block content %}
 {% with step=3 %}{% include "dash_steps.html" %}{% endwith %}
-<div class="pagehead"><div><h1>Hours & location 📍</h1><p>Step 3 of 6 — so the bot can answer “are you open?” and “where are you?”.</p></div></div>
+<div class="pagehead"><div><h1>Hours &amp; location</h1><p>Step 3 of 6 — so the bot can answer “are you open?” and “where are you?”.</p></div></div>
 <div class="card">
   {% if error %}<div class="formerror">{{ error }}</div>{% endif %}
   <form method="post">

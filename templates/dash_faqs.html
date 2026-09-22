@@ -2,7 +2,7 @@
 {% block title %}{{ biz.name }} · FAQs{% endblock %}
 {% block content %}
 <a class="backlink" href="{{ url_for('dashboard.business_home', bid=bid) }}">← {{ biz.name }}</a>
-<div class="pagehead"><div><h1>FAQs 💬</h1><p>The bot matches customer questions to these keywords and answers instantly.</p></div></div>
+<div class="pagehead"><div><h1>FAQs</h1><p>The bot matches customer questions to these keywords and answers instantly.</p></div></div>
 
 <div class="card">
   <h2>＋ Add FAQ</h2>
@@ -31,7 +31,7 @@
   <h2>Saved FAQs ({{ faqs|length }})</h2>
   {% if faqs %}
     {% for f in faqs %}
-    <div class="alert" style="border-color:#cbd5e1; background:#f8fafc;">
+    <div class="note">
       <b>{{ f.faq_key }}</b> <span class="muted">· {{ f.keywords }}</span>
       <div style="margin-top:6px;">{{ f.answer_en }}</div>
       {% if f.answer_hi %}<div class="muted" style="margin-top:4px;">{{ f.answer_hi }}</div>{% endif %}

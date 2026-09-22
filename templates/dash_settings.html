@@ -2,11 +2,11 @@
 {% block title %}{{ biz.name }} · Settings{% endblock %}
 {% block content %}
 <a class="backlink" href="{{ url_for('dashboard.business_home', bid=bid) }}">← {{ biz.name }}</a>
-<div class="pagehead"><div><h1>Settings ⚙️</h1><p>Everything the bot says and knows about your business.</p></div></div>
+<div class="pagehead"><div><h1>Settings</h1><p>Everything the bot says and knows about your business.</p></div></div>
 <div class="card">
   {% if error %}<div class="formerror">{{ error }}</div>{% endif %}
   <form method="post">
-    <div class="alert" style="border-color:#cbd5e1; background:#f8fafc;">
+    <div class="note">
       {{ tpl.emoji }} <b>{{ tpl.name }}</b> bot
       <span class="muted">· bot type is fixed after creation</span>
     </div>

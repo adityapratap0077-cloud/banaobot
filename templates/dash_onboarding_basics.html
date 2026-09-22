@@ -3,7 +3,7 @@
 {% block content %}
 {% with step=1 %}{% include "dash_steps.html" %}{% endwith %}
 <div class="pagehead"><div>
-  <h1>{{ tpl.emoji }} Let's meet your {{ tpl.name|lower }} 👋</h1>
+  <h1>Let's meet your {{ tpl.name|lower }}</h1>
   <p>Step 1 of 5 — the basics. <a href="{{ url_for('dashboard.onboarding') }}">← change type</a></p>
 </div></div>
 <div class="card">

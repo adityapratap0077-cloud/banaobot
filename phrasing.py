@@ -84,12 +84,24 @@ PACKS = {
                 "{open} se {last} ke beech koi time chuno — jaise '8pm'.",
             ],
             "ask_unit": [
-                "How many *{unit}*{name}? (1–20) 👥",
-                "Kitne *{unit}* aayenge{name}? (1–20) 👥",
+                "How many *{unit}*{name}? (up to {maxp}) 👥",
+                "Kitne *{unit}* aayenge{name}? (zyada se zyada {maxp}) 👥",
             ],
             "bad_unit": [
-                "Just the number{name} — between 1 and 20 🙂",
-                "Sirf number batao{name} — 1 se 20 ke beech 🙂",
+                "Just the number{name} 🙂",
+                "Sirf number batao{name} 🙂",
+            ],
+            "over_capacity": [
+                "For *{n} {unit}* I'll need the owner's okay — he'll message you here shortly to sort it out 🙏",
+                "That's a big group! *{n} {unit}* needs a quick confirmation from the owner — he'll contact you here soon 👍",
+            ],
+            "got_datetime": [
+                "Got it — *{date}* at *{time}* 👍",
+                "Locked in — *{date}*, *{time}* ✅",
+            ],
+            "got_time_ask_date": [
+                "*{time}* noted 👍 — and which *date*? 'today', 'tomorrow' or 25-09.",
+                "Okay, *{time}* ⏰ — what date? 'today', 'tomorrow' or 25-09.",
             ],
             "ask_name": [
                 "What's the booking name{name}? 📝",
@@ -180,12 +192,24 @@ PACKS = {
                 "Hey{name}, {open}–{last} ke beech hi booking hoti hai 🙂\nKoi aur time try karo.",
             ],
             "ask_unit": [
-                "Kitne *{unit}* aayenge{name}? (1–20) 👥",
-                "Total kitne *{unit}*{name}? (1–20) 👥",
+                "Kitne *{unit}* aayenge{name}? (zyada se zyada {maxp}) 👥",
+                "Total kitne *{unit}*{name}? (zyada se zyada {maxp}) 👥",
             ],
             "bad_unit": [
-                "Sirf number batao{name} — 1 se 20 ke beech 🙂",
-                "Number likho{name} — 1 se 20 tak 🙂",
+                "Sirf number batao{name} 🙂",
+                "Number likho{name} 🙂",
+            ],
+            "over_capacity": [
+                "*{n} {unit}* ke liye owner se confirm karna padega — wo yahin message karke arrange kar denge 🙏",
+                "Itna bada group! *{n} {unit}* ke liye owner ki permission chahiye — wo jaldi contact karenge 👍",
+            ],
+            "got_datetime": [
+                "Samajh gaya — *{date}* ko *{time}* 👍",
+                "Pakka — *{date}*, *{time}* ✅",
+            ],
+            "got_time_ask_date": [
+                "*{time}* note kar liya 👍 — date kaunsi? 'aaj', 'kal' ya 25-09.",
+                "Theek hai, *{time}* ⏰ — ab date batao? 'aaj', 'kal' ya 25-09.",
             ],
             "ask_name": [
                 "Booking kis naam par karoon{name}? 📝",
@@ -273,12 +297,24 @@ PACKS = {
                 "Could you pick another time?",
             ],
             "ask_unit": [
-                "How many *{unit}*{name}? (1–20)",
-                "Number of *{unit}*{name}? (1–20)",
+                "How many *{unit}*{name}? (up to {maxp})",
+                "Number of *{unit}*{name}? (up to {maxp})",
             ],
             "bad_unit": [
-                "Just a number between 1 and 20{name}, please.",
-                "Between 1 and 20{name} — what works?",
+                "Just a number{name}, please.",
+                "What number works{name}?",
+            ],
+            "over_capacity": [
+                "For *{n} {unit}*, I'll need to confirm with the owner — he'll reach out to you here shortly to arrange it.",
+                "A group of *{n} {unit}* needs the owner's confirmation — he'll contact you here soon.",
+            ],
+            "got_datetime": [
+                "Noted — *{date}* at *{time}*.",
+                "Confirmed: *{date}*, *{time}*.",
+            ],
+            "got_time_ask_date": [
+                "*{time}* noted — and which date? 'today', 'tomorrow' or 25-09.",
+                "Got the time (*{time}*) — which date works? 'today', 'tomorrow' or 25-09.",
             ],
             "ask_name": [
                 "The booking name{name}? 📝",
@@ -360,12 +396,24 @@ PACKS = {
                 "Ye samay booking hours ke bahar hai{name} ({open} – {last}). Koi aur samay chunein.",
             ],
             "ask_unit": [
-                "Kitne *{unit}*{name}? (1–20)",
-                "Kripya *{unit}* ki sankhya batayein{name}? (1–20)",
+                "Kitne *{unit}*{name}? (adhiktam {maxp})",
+                "Kripya *{unit}* ki sankhya batayein{name}? (adhiktam {maxp})",
             ],
             "bad_unit": [
-                "Kripya 1 se 20 ke beech sankhya batayein{name}.",
-                "Sankhya 1–20 ke beech honi chahiye{name}.",
+                "Kripya sankhya batayein{name}.",
+                "Ek sankhya likhein{name}.",
+            ],
+            "over_capacity": [
+                "*{n} {unit}* ke liye owner se pushti aavashyak hai — ve shighra yahin sampark karke vyavastha karenge.",
+                "Itna bada samooh! *{n} {unit}* hetu owner ka anumodan chahiye — ve jaldi sampark karenge.",
+            ],
+            "got_datetime": [
+                "Note kar liya — *{date}* ko *{time}*.",
+                "Nischit hua — *{date}*, *{time}*.",
+            ],
+            "got_time_ask_date": [
+                "*{time}* note kiya — kripya date batayein? 'aaj', 'kal' ya 25-09.",
+                "Samay (*{time}*) mil gaya — date kaunsi rahegi? 'aaj', 'kal' ya 25-09.",
             ],
             "ask_name": [
                 "Booking kis naam par karoon{name}? 📝",
@@ -447,12 +495,24 @@ PACKS = {
                 "Outta hours{name}! {open} se {last} tak. Another time?",
             ],
             "ask_unit": [
-                "How many *{unit}*{name}? (1–20) 👥",
-                "Headcount{name}? *{unit}* — 1 to 20 👥",
+                "How many *{unit}*{name}? (up to {maxp}) 👥",
+                "Headcount{name}? *{unit}* — up to {maxp} 👥",
             ],
             "bad_unit": [
-                "Just gimme a number{name} — 1 to 20 🙂",
-                "Number batao{name} — 1–20 🙂",
+                "Just gimme a number{name} 🙂",
+                "Number batao{name} 🙂",
+            ],
+            "over_capacity": [
+                "Oho, *{n} {unit}*! That's above what I can book directly — I'll get the owner to confirm, he'll ping you here soon 🙏",
+                "Big crew! *{n} {unit}* needs owner approval — he'll hit you up here shortly 👍",
+            ],
+            "got_datetime": [
+                "Bet — *{date}* at *{time}* 👍",
+                "Cool, *{date}*, *{time}* ✅",
+            ],
+            "got_time_ask_date": [
+                "*{time}* — got it ⏰ which date? 'today', 'tomorrow' or 25-09.",
+                "Time's set (*{time}*) — which date? 'today', 'tomorrow' or 25-09.",
             ],
             "ask_name": [
                 "Name for the booking{name}? 📝",
@@ -530,12 +590,24 @@ PACKS = {
                 "Hours ke bahar hai{name}! Koi aur time?",
             ],
             "ask_unit": [
-                "Kitne *{unit}*{name}? (1–20) 👥",
-                "Headcount{name}? (1–20) 👥",
+                "Kitne *{unit}*{name}? (zyada se zyada {maxp}) 👥",
+                "Headcount{name}? (zyada se zyada {maxp}) 👥",
             ],
             "bad_unit": [
-                "Number de{name} — 1 se 20 🙂",
+                "Number de{name} 🙂",
                 "Bas number{name} 🙂",
+            ],
+            "over_capacity": [
+                "Are wah, *{n} {unit}*! Itna bada group main directly book nahi kar sakta — owner confirm karke yahin message karega 🙏",
+                "Bhai *{n} {unit}?! Owner se poochhna padega — wo jaldi ping karega 👍",
+            ],
+            "got_datetime": [
+                "Samajh gaya boss — *{date}* ko *{time}* 👍",
+                "Done — *{date}*, *{time}* ✅",
+            ],
+            "got_time_ask_date": [
+                "*{time}* likh liya ⏰ — date bata? 'aaj', 'kal' ya 25-09.",
+                "Time set (*{time}*) — ab date? 'aaj', 'kal' ya 25-09.",
             ],
             "ask_name": [
                 "Naam{name}? 📝\nBooking usi par hogi.",

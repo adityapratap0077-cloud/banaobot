@@ -303,20 +303,15 @@ def _say(session, biz, lang, key, **kw):
 # Booking field parsers
 # ---------------------------------------------------------------------------
 
-def parse_date(text, today):
-    """'today'/'tomorrow'/'aaj'/'kal' or DD-MM[-YYYY]. Returns date or None."""
-    s = text.strip().lower()
-    if s in ("today", "aaj", "आज"):
-        return today
-    if s in ("tomorrow", "kal", "कल"):
-        return today + timedelta(days=1)
-    m = re.match(r"^(\d{1,2})[/\-.](\d{1,2})(?:[/\-.](\d{2,4}))?$", s)
-    if not m:
-        return None
-    d, mo = int(m.group(1)), int(m.group(2))
-    y = int(m.group(3)) if m.group(3) else today.year
-    if y < 100:
-        y += 2000
+_WEEKDAYS = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+    "friday": 4, "saturday": 5, "sunday": 6,
+    "mon": 0, "tue": 1, "tues": 1, "wed": 2, "thu": 3, "thur": 3,
+    "thurs": 3, "fri": 4, "sat": 5, "sun": 6,
+}
+
+
+def _valid_future_date(y, mo, d, today):
     try:
         dt = date(y, mo, d)
     except ValueError:
@@ -333,13 +328,32 @@ def parse_date(text, today):
     return dt
 
 
-def parse_time(text):
-    """'8pm', '8 pm', '8:30pm', '19:00', '20' -> (hour, minute) or None."""
-    s = text.strip().lower().replace(" ", "")
-    m = re.match(r"^(\d{1,2})(?::(\d{2}))?(am|pm)?$", s)
+def parse_date(text, today):
+    """'today'/'tomorrow'/'aaj'/'kal', weekday names, or DD-MM[-YYYY].
+
+    Searches *within* the message, so 'tomorrow 9pm' and 'friday 8pm' work.
+    Returns date or None.
+    """
+    s = text.strip().lower()
+    if re.search(r"\b(today|aaj|आज)\b", s):
+        return today
+    if re.search(r"\b(tomorrow|kal|कल)\b", s):
+        return today + timedelta(days=1)
+    for name, wd in _WEEKDAYS.items():
+        if re.search(r"\b" + name + r"\b", s):
+            delta = (wd - today.weekday()) % 7
+            return today + timedelta(days=delta)
+    m = re.search(r"(?<!\d)(\d{1,2})[/\-.](\d{1,2})(?:[/\-.](\d{2,4}))?(?!\d)", s)
     if not m:
         return None
-    h, mi, ap = int(m.group(1)), int(m.group(2) or 0), m.group(3)
+    d, mo = int(m.group(1)), int(m.group(2))
+    y = int(m.group(3)) if m.group(3) else today.year
+    if y < 100:
+        y += 2000
+    return _valid_future_date(y, mo, d, today)
+
+
+def _ampm_to_24(h, mi, ap):
     if mi > 59:
         return None
     if ap == "pm" and h < 12:
@@ -354,6 +368,34 @@ def parse_time(text):
     if not (0 <= h <= 23):
         return None
     return h, mi
+
+
+def extract_time(text):
+    """Find a time *within* a longer message: 'tomorrow 9pm', 'friday 8:30',
+    '9 baje'. Returns (hour, minute) or None. Does NOT match bare numbers."""
+    s = text.strip().lower()
+    m = re.search(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", s)
+    if m:
+        return _ampm_to_24(int(m.group(1)), int(m.group(2) or 0), m.group(3))
+    m = re.search(r"(\d{1,2})\s*baje\b", s)
+    if m:
+        return _ampm_to_24(int(m.group(1)), 0, None)
+    m = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", s)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def parse_time(text):
+    """'8pm', '8 pm', '8:30pm', '19:00', '20' -> (hour, minute) or None."""
+    found = extract_time(text)
+    if found:
+        return found
+    s = text.strip().lower().replace(" ", "")
+    m = re.match(r"^(\d{1,2})(?::(\d{2}))?(am|pm)?$", s)
+    if not m:
+        return None
+    return _ampm_to_24(int(m.group(1)), int(m.group(2) or 0), m.group(3))
 
 
 def fmt_time(h, mi):
@@ -387,7 +429,16 @@ def parse_party_size(text):
     if not m:
         return None
     n = int(m.group())
-    return n if 1 <= n <= 20 else None
+    return n if 1 <= n <= 200 else None
+
+
+def _max_party(biz):
+    """Largest group the bot books directly; bigger -> owner confirms."""
+    return biz.get("max_party_size") or 20
+
+
+_MANY = {"many", "lot", "lots", "bahut", "bohot", "zyada", "jyada",
+         "ज्यादा", "बहुत"}
 
 
 def parse_phone(text):
@@ -565,6 +616,18 @@ def _confirm_summary(session, biz, lang, b):
     return body
 
 
+def _time_ok(h, mi, biz):
+    """Is (h, mi) inside the business's bookable hours?"""
+    return _hm_tuple(biz["hours_open"]) <= (h, mi) <= _hm_tuple(biz["last_booking"])
+
+
+def _ask_size(session, biz, lang):
+    """'How many guests?' with the dynamic capacity and cancel hint."""
+    return (_say(session, biz, lang, "ask_unit",
+                 unit=biz["tpl"]["unit"][lang], maxp=_max_party(biz))
+            + "\n\n" + STR["cancel_hint"][lang])
+
+
 def handle_booking(phone, raw, low, words, session, lang, events, today, biz):
     """Step-by-step booking state machine. Returns list of replies."""
     state = session["state"]
@@ -585,38 +648,88 @@ def handle_booking(phone, raw, low, words, session, lang, events, today, biz):
 
     if state == "book_date":
         dt = parse_date(raw, today)
-        if not dt:
+        tm = parse_time(raw)  # also finds times inside "tomorrow 9pm"
+        if not dt and not tm:
             return [t(_say(session, biz, lang, "bad_date"))]
-        b["date"] = dt.isoformat()
-        session["state"] = "book_time"
-        ask = _say(session, biz, lang, "ask_time",
-                   open=_fmt_hm(biz["hours_open"], lang),
-                   close=_fmt_hm(biz["hours_close"], lang))
-        return [t(ask + "\n\n" + STR["cancel_hint"][lang])]
-
-    if state == "book_time":
-        parsed = parse_time(raw)
-        if not parsed:
+        if dt and tm:
+            # "tomorrow 9pm" — date and time in one message, skip ahead
+            h, mi = tm
+            b["date"] = dt.isoformat()
+            if not _time_ok(h, mi, biz):
+                session["state"] = "book_time"
+                return [t(_say(session, biz, lang, "bad_time",
+                                open=_fmt_hm(biz["hours_open"], lang),
+                                last=_fmt_hm(biz["last_booking"], lang)))]
+            b["time"] = f"{h:02d}:{mi:02d}"
+            session["state"] = "book_size"
+            got = _say(session, biz, lang, "got_datetime",
+                       date=dt.strftime("%a, %d %b"), time=fmt_time(h, mi))
+            return [t(got + "\n" + _ask_size(session, biz, lang))]
+        if dt:
+            b["date"] = dt.isoformat()
+            session["state"] = "book_time"
+            ask = _say(session, biz, lang, "ask_time",
+                       open=_fmt_hm(biz["hours_open"], lang),
+                       close=_fmt_hm(biz["hours_close"], lang))
+            return [t(ask + "\n\n" + STR["cancel_hint"][lang])]
+        # time only ("9pm") — stash it, still need the date
+        h, mi = tm
+        if not _time_ok(h, mi, biz):
             return [t(_say(session, biz, lang, "bad_time",
                             open=_fmt_hm(biz["hours_open"], lang),
                             last=_fmt_hm(biz["last_booking"], lang)))]
-        h, mi = parsed
-        open_t = _hm_tuple(biz["hours_open"])
-        last_t = _hm_tuple(biz["last_booking"])
-        if (h, mi) < open_t or (h, mi) > last_t:
+        b["time"] = f"{h:02d}:{mi:02d}"
+        session["state"] = "book_time"
+        return [t(_say(session, biz, lang, "got_time_ask_date",
+                       time=fmt_time(h, mi))
+                   + "\n\n" + STR["cancel_hint"][lang])]
+
+    if state == "book_time":
+        dt = parse_date(raw, today)
+        tm = parse_time(raw)
+        if dt and not tm and b.get("time"):
+            # gave time first, now the date ("8pm" -> "tomorrow")
+            b["date"] = dt.isoformat()
+            session["state"] = "book_size"
+            return [t(_ask_size(session, biz, lang))]
+        if dt:
+            b["date"] = dt.isoformat()  # correcting the date mid-flow
+            if not tm:
+                ask = _say(session, biz, lang, "ask_time",
+                           open=_fmt_hm(biz["hours_open"], lang),
+                           close=_fmt_hm(biz["hours_close"], lang))
+                return [t(ask + "\n\n" + STR["cancel_hint"][lang])]
+        if not tm:
+            return [t(_say(session, biz, lang, "bad_time",
+                            open=_fmt_hm(biz["hours_open"], lang),
+                            last=_fmt_hm(biz["last_booking"], lang)))]
+        h, mi = tm
+        if not _time_ok(h, mi, biz):
             return [t(_say(session, biz, lang, "bad_time",
                             open=_fmt_hm(biz["hours_open"], lang),
                             last=_fmt_hm(biz["last_booking"], lang)))]
         b["time"] = f"{h:02d}:{mi:02d}"
         session["state"] = "book_size"
-        ask = _say(session, biz, lang, "ask_unit", unit=biz["tpl"]["unit"][lang])
-        return [t(ask + "\n\n" + STR["cancel_hint"][lang])]
+        return [t(_ask_size(session, biz, lang))]
 
     if state == "book_size":
         n = parse_party_size(raw)
+        maxp = _max_party(biz)
+        unit = biz["tpl"]["unit"][lang]
+        if n is None and _has_any(words, _MANY):
+            n = maxp + 1  # "a lot of people" -> over capacity path
         if n is None:
-            return [t(_say(session, biz, lang, "bad_unit",
-                            unit=biz["tpl"]["unit"][lang]))]
+            return [t(_say(session, biz, lang, "bad_unit"))]
+        if n > maxp:
+            # too big to book directly: be honest, loop the owner in
+            events.append({"type": "owner_alert",
+                           "reason": (f"large party request: {n} {unit} on "
+                                      f"{b.get('date')} at {b.get('time')}; "
+                                      f"customer wa {phone}")})
+            _reset_data(session)
+            session["state"] = "idle"
+            return [t(_say(session, biz, lang, "over_capacity",
+                           n=n, unit=unit))]
         b["party_size"] = n
         session["state"] = "book_name"
         return [t(_say(session, biz, lang, "ask_name") + "\n\n" + STR["cancel_hint"][lang])]

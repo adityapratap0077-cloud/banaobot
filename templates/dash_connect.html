@@ -3,7 +3,7 @@
 {% block content %}
 <a class="backlink" href="{{ url_for('dashboard.business_home', bid=bid) }}">← {{ biz.name }}</a>
 <div class="pagehead">
-  <div><h1>Connect WhatsApp 🔗</h1><p>Link your real WhatsApp Business number so customers can chat with the bot.</p></div>
+  <div><h1>Connect WhatsApp</h1><p>Link your real WhatsApp Business number so customers can chat with the bot.</p></div>
 </div>
 
 <div class="card">
@@ -28,8 +28,8 @@
 </div>
 
 {% if demo %}
-<div class="card" style="border-color:#fde68a; background:#fffbeb;">
-  <h2>🧪 Demo mode</h2>
+<div class="card" style="border-color:rgba(251,191,36,.4);">
+  <h2>Demo mode</h2>
   <p class="muted" style="font-size:14px;">DEMO_MODE is on, so the Facebook button above is stubbed and you can
      simulate a full connection without a Meta account:</p>
   <form method="post" action="{{ url_for('dashboard.connect_simulate', bid=bid) }}">
