@@ -215,7 +215,7 @@ function renderReplies(replies) {
     } else if (r.type === 'interactive') {
       const iv = r.interactive;
       bubble(iv.body.text, 'in');
-      if (iv.footer) bubble('_' + iv.footer.text + '_', 'in');
+      if (iv.footer) bubble(iv.footer.text, 'in');
       const box = document.createElement('div');
       box.className = 'opts';
       if (iv.type === 'button') {
