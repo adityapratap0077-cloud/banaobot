@@ -1,0 +1,63 @@
+{% extends "dash_base.html" %}
+{% block title %}{{ biz.name }} · Review auto-built {{ tpl.catalog.en|lower }}{% endblock %}
+{% block head %}
+<style>
+  .rev-cat{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+           padding:16px;margin-bottom:14px;}
+  .rev-cathead{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap;}
+  .rev-cathead input[type=text]{font-size:15px;font-weight:700;}
+  .rev-row{display:grid;grid-template-columns:1fr 110px 92px 34px;gap:8px;align-items:center;
+           padding:8px 0;border-top:1px solid var(--line);}
+  .rev-row input[type=text],.rev-row input[type=number]{width:100%;padding:9px 10px;font-size:14px;}
+  .rev-row.skipped{opacity:.35;}
+  .rev-head{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+  .skipchk{display:flex;align-items:center;justify-content:center;}
+  .skipchk input{width:18px;height:18px;accent-color:#e5484d;}
+  @media(max-width:560px){.rev-row{grid-template-columns:1fr 84px 34px;}
+    .rev-row .vegcell{display:none;}}
+</style>
+{% endblock %}
+{% block content %}
+<a class="backlink" href="{{ url_for('dashboard.menu_import_page', bid=bid) }}">← Back to import</a>
+<div class="pagehead">
+  <div><h1>Review — {{ total }} items found ✅</h1>
+  <p>{% if via_ocr %}Read from your photo with OCR — double-check prices.{% else %}Parsed from your text.{% endif %}
+     Fix anything, untick what you don't want, then save.</p></div>
+</div>
+
+<form method="post" action="{{ url_for('dashboard.menu_import_save', bid=bid) }}">
+  {% for g in groups %}
+  {% set gi = loop.index0 %}
+  <div class="rev-cat" id="g{{ gi }}">
+    <div class="rev-cathead">
+      <input type="text" name="emoji_{{ gi }}" value="{{ g.emoji }}" style="max-width:64px;text-align:center;" maxlength="8" title="Category emoji">
+      <input type="text" name="cat_{{ gi }}" value="{{ g.category }}" style="flex:1;min-width:180px;" maxlength="60">
+      <label class="muted" style="font-size:13px;display:flex;gap:6px;align-items:center;">
+        <input type="checkbox" name="skipcat_{{ gi }}" onchange="document.getElementById('g{{ gi }}').classList.toggle('rev-skipped', this.checked)"
+               style="width:16px;height:16px;accent-color:#e5484d;"> skip category
+      </label>
+    </div>
+    <div class="rev-row rev-head"><span>Item</span><span>Price (₹)</span>{% if show_veg %}<span class="vegcell">Non-veg?</span>{% endif %}<span></span></div>
+    {% for it in g["items"] %}
+    {% set ji = loop.index0 %}
+    <div class="rev-row" id="r{{ gi }}_{{ ji }}" {% if not show_veg %}style="grid-template-columns:1fr 110px 34px;"{% endif %}>
+      <input type="text" name="name_{{ gi }}_{{ ji }}" value="{{ it.name }}" maxlength="80" title="{{ it.description }}">
+      <input type="number" name="price_{{ gi }}_{{ ji }}" value="{{ it.price }}" min="0" max="9999999">
+      {% if show_veg %}
+      <label class="vegcell muted" style="font-size:13px;display:flex;gap:6px;align-items:center;justify-content:center;">
+        <input type="checkbox" name="nonveg_{{ gi }}_{{ ji }}" {% if not it.veg %}checked{% endif %}
+               style="width:16px;height:16px;"> 🔴
+      </label>
+      {% endif %}
+      <label class="skipchk" title="Skip this item">
+        <input type="checkbox" name="skip_{{ gi }}_{{ ji }}" onchange="document.getElementById('r{{ gi }}_{{ ji }}').classList.toggle('skipped', this.checked)">
+      </label>
+      <input type="hidden" name="desc_{{ gi }}_{{ ji }}" value="{{ it.description }}">
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+  <button class="btn block" type="submit">💾 Save {{ total }} items to my {{ tpl.catalog.en|lower }}</button>
+  <p class="muted" style="font-size:13px;text-align:center;">Unticked rows are skipped. You can edit everything later in the {{ tpl.catalog.en|lower }} builder.</p>
+</form>
+{% endblock %}

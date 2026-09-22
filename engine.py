@@ -55,6 +55,11 @@ from content import MENU as _CONTENT_MENU
 from content import RESTAURANT as _CONTENT_RESTAURANT
 from content import STR
 
+try:
+    import brain as _brain
+except ImportError:  # brain.py is stdlib-only; this is belt-and-braces
+    _brain = None
+
 CMD = "cmd:"
 
 # ---------------------------------------------------------------------------
@@ -207,10 +212,22 @@ def pick_list(body, button_text, sections, footer=None):
 
 _HINDI_ROMAN = {
     "namaste", "namaskar", "khana", "khaana", "bhojan", "shakahari",
-    "samay", "pata", "patta", "kitne", "kya", "hai", "mein", "main",
+    "samay", "pata", "patta", "kitne", "kya", "hai", "mein",
     "aap", "aapka", "mujhe", "chahiye", "batao", "bataiye", "kripya",
     "dhanyavaad", "shukriya", "accha", "acha", "haan", "nahi", "kal",
     "aaj", "daam", "keemat", "theek", "kripaya",
+    # everyday Hinglish — the way people actually type
+    "kaise", "kaisa", "kaisi", "kab", "kahan", "kaha", "kaun", "kyun",
+    "tum", "tumhe", "tumhara", "tumhari", "tera", "teri", "tere",
+    "mera", "meri", "mere", "hamara", "hamari", "apna", "apni",
+    "karna", "karega", "karegi", "karo", "kiya", "hua", "hoga", "hogi",
+    "chahta", "chahti", "liye", "saath", "yahan", "wahan",
+    "bahut", "bohot", "bahot", "achha", "achhi", "badhiya", "badiya",
+    "suno", "dekho", "bolo", "bata", "milega", "hota", "hoti",
+    "raha", "rahi", "rahe", "wahi", "yahi", "sab", "kuch", "koi",
+    "wala", "wali", "wale", "arre", "aaunga", "aaungi", "jaunga",
+    "jaungi", "karunga", "karungi", "gaya", "gayi", "aaya", "aayi",
+    "khaya", "piya", "liya", "diya", "bol",
 }
 
 
@@ -220,6 +237,26 @@ def looks_hindi(text):
         return True
     words = set(re.findall(r"[a-z]+", text.lower()))
     return bool(words & _HINDI_ROMAN)
+
+
+def detect_language(text):
+    """Per-message language signal: 'hi' | 'en' | None.
+
+    * 'hi' — Devanagari script, or a romanized Hindi (Hinglish) word.
+    * 'en' — several plain words with no Hindi signal (a real sentence).
+    * None — neutral: greetings ("hi", "ok"), typos, emoji-only. The caller
+      keeps the current language so the bot never flip-flops on short chats.
+    """
+    if re.search(r"[\u0900-\u097F]", text or ""):
+        return "hi"
+    words = re.findall(r"[a-z]+", (text or "").lower())
+    if not words:
+        return None
+    if any(w in _HINDI_ROMAN for w in words):
+        return "hi"
+    if len(words) >= 3:
+        return "en"
+    return None
 
 
 def _words(text):
@@ -494,11 +531,12 @@ def render_categories(lang, biz):
 def render_items(cat, lang, biz):
     lines = [f"*{cat['name'][lang]}* {cat['emoji']}", ""]
     for it in cat["items"]:
+        price = f" — ₹{it['price']}" if it["price"] else ""
         if biz["tpl"]["show_veg"]:
             mark = "🟢" if it["veg"] else "🔴"
-            lines.append(f"{mark} {it['name'][lang]} — ₹{it['price']}")
+            lines.append(f"{mark} {it['name'][lang]}{price}")
         else:
-            lines.append(f"▪️ {it['name'][lang]} — ₹{it['price']}")
+            lines.append(f"▪️ {it['name'][lang]}{price}")
     if biz["tpl"]["show_veg"]:
         lines += ["", "_🟢 veg · 🔴 non-veg_"]
     return "\n".join(lines)
@@ -946,6 +984,19 @@ def handle_idle(phone, raw, low, words, session, lang, events, today, biz):
     if _has_any(words, _HUMAN):
         return do_handoff(phone, raw, session, lang, events, biz)
 
+    # Brain: when enabled, open chat goes to the LLM instead of the generic
+    # fallback — it can handle anything and keeps the conversation going.
+    # Rules still own bookings / menus / FAQs above; the brain only speaks
+    # here, and quietly steps aside if the API key is missing or fails.
+    if _brain is not None and _brain.brain_on(biz) and raw.strip():
+        hist = session.get("hist") or []
+        answer = _brain.chat(biz.get("brain_key") or "", biz, hist,
+                             raw.strip(), lang)
+        if answer:
+            session["hist"] = (hist + [("user", raw.strip()[:1500]),
+                                       ("model", answer[:1500])])[-16:]
+            return [t(answer), quick_menu(session, lang, biz)]
+
     fallback = (_say(session, biz, lang, "fallback") + "\n\n"
                 + STR["hint_human"][lang])
     return [t(fallback), quick_menu(session, lang, biz)]
@@ -995,17 +1046,26 @@ def handle_message(phone, text, session, business=None, today=None):
     low = raw.lower()
     words = _words(raw)
 
-    # explicit language switch (works in any state)
+    # explicit language switch (works in any state; sticks for the chat)
     if low in ("/english", "english"):
         session["lang"] = "en"
+        session["lang_locked"] = True
         return [t(STR["lang_set_en"]["en"])], _emit(session, events)
     if low in ("/hindi", "hindi", "हिंदी"):
         session["lang"] = "hi"
+        session["lang_locked"] = True
         return [t(STR["lang_set_hi"]["hi"])], _emit(session, events)
 
-    # auto-detect language on first contact (default to business language)
+    # auto-detect Hindi / English / Hinglish from EVERY message — nobody has
+    # to pick a language. Neutral messages ("ok", "hi", typos) and button
+    # taps keep the current language; an explicit /english or /hindi above
+    # locks it for the rest of the chat.
+    if not session.get("lang_locked") and not raw.startswith(CMD):
+        detected = detect_language(raw)
+        if detected:
+            session["lang"] = detected
     if not session.get("lang"):
-        session["lang"] = "hi" if looks_hindi(raw) else biz.get("language", "en")
+        session["lang"] = biz.get("language", "en")
     lang = session["lang"]
 
     # interactive button/list taps arrive as "cmd:..." ids
@@ -1038,6 +1098,7 @@ def handle_message(phone, text, session, business=None, today=None):
             return cancel_booking(session, lang, biz), _emit(session, events)
         if cmd == "lang_toggle":
             session["lang"] = "hi" if lang == "en" else "en"
+            session["lang_locked"] = True  # an explicit tap is a choice
             key = "lang_set_hi" if session["lang"] == "hi" else "lang_set_en"
             new_lang = session["lang"]
             return [t(STR[key][new_lang]),

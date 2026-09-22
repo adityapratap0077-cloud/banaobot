@@ -87,4 +87,62 @@
     <button class="btn block" type="submit">Save settings</button>
   </form>
 </div>
+
+<div class="card" style="margin-top:16px;">
+  <div class="pagehead" style="margin-bottom:6px;"><div>
+    <h1 style="font-size:20px;">🧠 Bot brain <span style="font-weight:400; font-size:13px;" class="muted">(optional)</span></h1>
+    <p>Give your bot a brain for open conversation — it handles anything the rules don't: chit-chat, odd questions, small talk — and keeps the chat going naturally. Menus, bookings and FAQs stay rule-based, so prices and bookings never get hallucinated.</p>
+  </div></div>
+  <div style="margin:10px 0 14px;">
+    {% if brain_on %}
+      <span class="badge st-active">● Brain ON</span>
+    {% elif brain_key_set %}
+      <span class="badge st-draft">○ Key saved, brain OFF</span>
+    {% else %}
+      <span class="badge st-draft">○ Brain OFF</span>
+    {% endif %}
+  </div>
+  <form method="post" action="{{ url_for('dashboard.brain_settings', bid=bid) }}">
+    <label class="f">Gemini API key
+      <input type="password" name="brain_api_key" autocomplete="off"
+             placeholder="{% if brain_key_set %}•••••••• (saved — leave blank to keep){% else %}Paste your key here{% endif %}">
+      <span class="hint">Free from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> — the free tier is plenty for a small business. Stored encrypted, never shown again.</span>
+    </label>
+    <label class="f" style="display:flex; align-items:center; gap:10px;">
+      <input type="checkbox" name="brain_enabled" value="1" {% if brain_on %}checked{% endif %} style="width:auto; margin:0;">
+      <span>Enable the brain
+        <span class="hint" style="display:block;">Off → the bot uses its classic replies everywhere (unchanged).</span>
+      </span>
+    </label>
+    <button class="btn block" type="submit">Save brain settings</button>
+  </form>
+  {% if brain_key_set %}
+  <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap;">
+    <button class="btn ghost" type="button" id="brainTestBtn">⚡ Test the brain</button>
+    <form method="post" action="{{ url_for('dashboard.brain_remove', bid=bid) }}" style="margin:0;"
+          onsubmit="return confirm('Remove the brain API key? The brain will switch off.');">
+      <button class="btn ghost" type="submit">Remove key</button>
+    </form>
+  </div>
+  <div id="brainTestOut" class="note" style="display:none; margin-top:12px;"></div>
+  <script>
+  (function(){
+    var btn = document.getElementById('brainTestBtn');
+    var out = document.getElementById('brainTestOut');
+    btn.addEventListener('click', function(){
+      out.style.display = 'block';
+      out.textContent = 'Asking the brain…';
+      btn.disabled = true;
+      fetch('{{ url_for('dashboard.brain_test', bid=bid) }}', {method: 'POST'})
+        .then(function(r){ return r.json().then(function(j){ return {s: r.ok, j: j}; }); })
+        .then(function(res){
+          out.textContent = res.s ? ('🧠 ' + res.j.reply) : ('⚠️ ' + (res.j.error || 'Failed.'));
+          btn.disabled = false;
+        })
+        .catch(function(){ out.textContent = '⚠️ Could not reach the server.'; btn.disabled = false; });
+    });
+  })();
+  </script>
+  {% endif %}
+</div>
 {% endblock %}

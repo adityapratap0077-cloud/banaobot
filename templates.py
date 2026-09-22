@@ -453,6 +453,72 @@ TEMPLATES = {
             },
         ],
     },
+    "personal": {
+        "name": "Personal Chatbot",
+        "emoji": "🤖",
+        "blurb": "Your own assistant — no business needed. Answers questions about you, shares your links, in your tone.",
+        "catalog": {"en": "My Links", "hi": "मेरे लिंक"},
+        "item_plural": {"en": "links", "hi": "लिंक"},
+        "btn_catalog": {"en": "🔗 My Links", "hi": "🔗 मेरे लिंक"},
+        "booking_enabled": False,
+        "btn_action": {"en": "📩 Leave a Message", "hi": "📩 मैसेज छोड़ें"},
+        "unit": {"en": "visitors", "hi": "विज़िटर"},
+        "unit_word": {"en": "Visitors", "hi": "विज़िटर"},
+        "catalog_heading": {
+            "en": "Here's my corner of the internet 👇\nPick a category:",
+            "hi": "Yeh raha mera stuff 👇\nCategory chuno:",
+        },
+        "show_veg": False,
+        "cat_examples": "e.g. Socials, Work, Playlists",
+        "item_example": "e.g. Instagram profile",
+        "default_tone": "casual",
+        "welcome_en": (
+            "Hey! I'm *{name}* 🤖\n{tagline}\n\nAsk me anything — about me, my work, or my links 👇"
+        ),
+        "welcome_hi": (
+            "Hey! Main *{name}* hoon 🤖\n{tagline}\n\nKuch bhi poochho — mere baare mein, mere kaam ke baare mein 👇"
+        ),
+        "booked_ok": {
+            "en": [
+                "Noted{name}! ✅\nRef: *{bid}*",
+                "Got it{name}! ✅\nRef: *{bid}*",
+            ],
+            "hi": [
+                "Note kar liya{name}! ✅\nRef: *{bid}*",
+                "Mil gaya{name}! ✅\nRef: *{bid}*",
+            ],
+        },
+        "hours_note": {
+            "en": ("🤖 *Always here*\nI reply instantly, any time.\n\n"
+                   "📍 *Based in*\n{addr}"),
+            "hi": ("🤖 *Hamesha available*\nMain turant reply karta hoon, kabhi bhi.\n\n"
+                   "📍 *पता*\n{addr}"),
+        },
+        "faq_seeds": [
+            {
+                "id": "about",
+                "keywords": ["who are you", "about", "yourself", "introduce", "bio", "तुम कौन"],
+                "answer_en": ("🤖 *About me*\nI'm {name}'s personal bot — ask me about their work, "
+                              "their links, or just say hi! ✨"),
+                "answer_hi": ("🤖 *Mere baare mein*\nMain {name} ka personal bot hoon — unke kaam, "
+                              "links ke baare mein poochho, ya bas hi bolo! ✨"),
+            },
+            {
+                "id": "links",
+                "keywords": ["link", "links", "social", "instagram", "youtube", "website", "लिंक"],
+                "answer_en": ("🔗 *Links*\nEverything's under “My Links” below — tap and explore! 👇"),
+                "answer_hi": ("🔗 *लिंक*\nSab kuch neeche “My Links” mein hai — tap karke dekho! 👇"),
+            },
+            {
+                "id": "contact",
+                "keywords": ["contact", "email", "reach", "dm", "talk", "संपर्क", "बात"],
+                "answer_en": ("📩 *Contact*\nTap “Leave a Message” and I'll pass it on — "
+                              "I check messages personally. ✨"),
+                "answer_hi": ("📩 *संपर्क*\n“Leave a Message” dabao, main pahuncha dunga — "
+                              "messages personally check hote hain. ✨"),
+            },
+        ],
+    },
 }
 
 TEMPLATE_IDS = tuple(TEMPLATES.keys())

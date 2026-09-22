@@ -10,20 +10,23 @@
   {% if error %}<div class="formerror">{{ error }}</div>{% endif %}
   <form method="post">
     <input type="hidden" name="template" value="{{ tid }}">
-    <label class="f">Business name *
-      <input type="text" name="name" required placeholder="e.g. Sharma Dhaba" value="{{ request.form.get('name','') }}">
+    <label class="f">{{ "Bot name" if is_personal else "Business name" }} *
+      <input type="text" name="name" required
+             placeholder="{{ 'e.g. Aditya\u2019s Bot' if is_personal else 'e.g. Sharma Dhaba' }}"
+             value="{{ request.form.get('name','') }}">
+      {% if is_personal %}<span class="hint">People will chat with this bot — make it yours.</span>{% endif %}
     </label>
     <label class="f">Default language
       <select name="language">
         <option value="en" {% if request.form.get('language','en')=='en' %}selected{% endif %}>English</option>
         <option value="hi" {% if request.form.get('language')=='hi' %}selected{% endif %}>हिन्दी (Hindi)</option>
       </select>
-      <span class="hint">The bot greets customers in this language first.</span>
+      <span class="hint">Only a starting point — the bot auto-detects Hindi, English and Hinglish from every message. Nobody has to pick a language.</span>
     </label>
-    <label class="f">Owner phone *
-      <input type="text" name="owner_phone" required inputmode="tel" placeholder="e.g. 919876543210"
-             value="{{ request.form.get('owner_phone','') }}">
-      <span class="hint">When a customer asks for a human, the bot alerts this number.</span>
+    <label class="f">Owner phone {% if not is_personal %}*{% endif %}
+      <input type="text" name="owner_phone" {% if not is_personal %}required{% endif %} inputmode="tel"
+             placeholder="e.g. 919876543210" value="{{ request.form.get('owner_phone','') }}">
+      <span class="hint">{% if is_personal %}Optional — if someone asks for you, the alert lands here. Otherwise alerts just appear on your dashboard.{% else %}When a customer asks for a human, the bot alerts this number.{% endif %}</span>
     </label>
     <div class="row2">
       <label class="f">Tagline (English)

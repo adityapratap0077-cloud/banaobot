@@ -24,7 +24,7 @@
     <a href="{{ url_for('dashboard.menu_page', bid=bid) }}"><span class="e">{{ tpl.emoji }}</span>{{ tpl.catalog.en }}</a>
     <a href="{{ url_for('dashboard.faqs_page', bid=bid) }}"><span class="e">💬</span>FAQs</a>
     <a href="{{ url_for('dashboard.settings', bid=bid) }}"><span class="e">⚙️</span>Settings</a>
-    <a href="{{ url_for('dashboard.connect', bid=bid) }}"><span class="e">🔗</span>Connect WhatsApp</a>
+    <a href="{{ url_for('dashboard.connect', bid=bid) }}"><span class="e">{% if tid == "personal" %}📱{% else %}🔗{% endif %}</span>{% if tid == "personal" %}Where it lives{% else %}Connect WhatsApp{% endif %}</a>
   </div>
 </div>
 

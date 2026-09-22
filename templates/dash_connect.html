@@ -3,9 +3,24 @@
 {% block content %}
 <a class="backlink" href="{{ url_for('dashboard.business_home', bid=bid) }}">← {{ biz.name }}</a>
 <div class="pagehead">
-  <div><h1>Connect WhatsApp</h1><p>Link your real WhatsApp Business number so customers can chat with the bot.</p></div>
+  <div><h1>{% if is_personal %}Where your bot lives{% else %}Connect WhatsApp{% endif %}</h1>
+  <p>{% if is_personal %}Personal bots don't need a business number or a Meta app — they chat right here in BanaoBot.{% else %}Link your real WhatsApp Business number so customers can chat with the bot.{% endif %}</p></div>
 </div>
 
+{% if is_personal %}
+<div class="card" style="border-color:rgba(0,168,132,.5);">
+  <h2>🤖 Personal mode — no WhatsApp Business needed</h2>
+  <p class="muted" style="font-size:14px;">Your bot is ready to chat <b>right now</b>, no Meta setup, no business account:</p>
+  <ul style="font-size:14.5px; line-height:2;">
+    <li>💬 <a href="{{ url_for('dashboard.preview', bid=bid) }}"><b>Open the live chat preview</b></a> — talk to your bot exactly like a visitor would.</li>
+    <li>📨 Messages people leave via “{{ tpl.btn_action.en }}” land on your <a href="{{ url_for('dashboard.business_home', bid=bid) }}">dashboard</a> as alerts.</li>
+  </ul>
+  <p class="muted" style="font-size:13.5px; margin-bottom:0;">One honest note: Meta's official API only allows <b>business</b> numbers, so a real
+     personal-WhatsApp-number connection isn't possible — that's Meta's rule, not ours. Unofficial workarounds
+     exist but risk getting the number banned, so we don't offer them. The preview above is the safe way to let
+     people chat with your bot.</p>
+</div>
+{% else %}
 <div class="card">
   <h2>Current status</h2>
   <table class="tbl">
@@ -136,4 +151,5 @@ document.getElementById('manual-form').addEventListener('submit', function (e) {
   });
 });
 </script>
+{% endif %}
 {% endblock %}

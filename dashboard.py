@@ -29,6 +29,7 @@ from flask import (
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import templates
+import menu_import
 
 bp = Blueprint("dashboard", __name__, template_folder="templates")
 
@@ -354,6 +355,7 @@ def onboarding_basics():
     if tid not in templates.ids():
         tid = "restaurant"
     tpl = templates.get(tid)
+    is_personal = (tid == "personal")
     error = None
     if request.method == "POST":
         name = request.form.get("name", "").strip()
@@ -364,8 +366,8 @@ def onboarding_basics():
         if language not in ("en", "hi"):
             language = "en"
         if not name:
-            error = "Business name is required."
-        elif not owner_phone:
+            error = "Bot name is required." if is_personal else "Business name is required."
+        elif not owner_phone and not is_personal:
             error = "Owner phone is required — handoff alerts go here."
         else:
             bid = store().create_business(
@@ -377,7 +379,7 @@ def onboarding_basics():
             flash(f"“{name}” created! Now add your {tpl['catalog']['en'].lower()}. {tpl['emoji']}")
             return redirect(url_for("dashboard.onboarding_menu", bid=bid))
     return render_template("dash_onboarding_basics.html", error=error,
-                           tpl=tpl, tid=tid)
+                           tpl=tpl, tid=tid, is_personal=is_personal)
 
 
 @bp.route("/onboarding/<int:bid>/menu")
@@ -663,6 +665,104 @@ def api_reorder_items(cid):
 
 
 # ---------------------------------------------------------------------------
+# menu auto-import: paste text / upload file / OCR a menu photo -> review ->
+# one click saves everything as categories + items.
+# ---------------------------------------------------------------------------
+
+_MAX_MENU_UPLOAD = 4 * 1024 * 1024  # 4 MB
+
+
+@bp.route("/business/<int:bid>/menu/import")
+@login_required
+def menu_import_page(bid):
+    biz = own_business_or_404(bid)
+    tid, tpl, tone = _tpl(biz)
+    return render_template("dash_menu_import.html", biz=biz, bid=bid,
+                           tpl=tpl, error=None)
+
+
+@bp.post("/business/<int:bid>/menu/import/parse")
+@login_required
+def menu_import_parse(bid):
+    biz = own_business_or_404(bid)
+    tid, tpl, tone = _tpl(biz)
+
+    def _fail(msg):
+        return render_template("dash_menu_import.html", biz=biz, bid=bid,
+                               tpl=tpl, error=msg)
+
+    text = (request.form.get("menu_text") or "").strip()
+    via_ocr = False
+    f = request.files.get("menu_file")
+    if f and (f.filename or "").strip():
+        data = f.read(_MAX_MENU_UPLOAD + 1)
+        if len(data) > _MAX_MENU_UPLOAD:
+            return _fail("That file is over 4 MB — try a smaller photo.")
+        try:
+            text, via_ocr = menu_import.parse_upload(f.filename, data)
+        except menu_import.OCRError as exc:
+            return _fail(str(exc))
+        text = (text or "").strip()
+    if not text:
+        return _fail("Paste your menu text or upload a menu file first.")
+    groups = menu_import.parse_menu_text(text)
+    if not groups:
+        return _fail("Couldn't find any items with prices in that. "
+                     "Make sure each line has an item name and a price "
+                     "(e.g. “Paneer Tikka — ₹250”), or try a clearer photo.")
+    total = sum(len(g["items"]) for g in groups)
+    return render_template(
+        "dash_menu_import_review.html", biz=biz, bid=bid, tpl=tpl,
+        groups=groups, total=total, via_ocr=via_ocr,
+        show_veg=bool(tpl.get("show_veg")))
+
+
+@bp.post("/business/<int:bid>/menu/import/save")
+@login_required
+def menu_import_save(bid):
+    own_business_or_404(bid)
+    st = store()
+    form = request.form
+    cats_made, items_made = 0, 0
+    for i in range(200):  # group index
+        cat_key = f"cat_{i}"
+        if cat_key not in form:
+            break
+        if form.get(f"skipcat_{i}"):
+            continue
+        cat_name = (form.get(cat_key) or "").strip()
+        if not cat_name:
+            continue
+        emoji = (form.get(f"emoji_{i}") or "🍽️").strip() or "🍽️"
+        cid = st.add_category(bid, cat_name, "", emoji)
+        cats_made += 1
+        for j in range(500):  # item index within the group
+            name_key = f"name_{i}_{j}"
+            if name_key not in form:
+                break
+            if form.get(f"skip_{i}_{j}"):
+                continue
+            name = (form.get(name_key) or "").strip()
+            if not name:
+                continue
+            try:
+                price = int((form.get(f"price_{i}_{j}") or "0").strip() or 0)
+            except (TypeError, ValueError):
+                price = 0
+            price = max(0, price)
+            veg = 0 if form.get(f"nonveg_{i}_{j}") else 1
+            desc = (form.get(f"desc_{i}_{j}") or "").strip()
+            st.add_item(cid, name, "", price, veg, desc)
+            items_made += 1
+    if not items_made:
+        flash("Nothing was saved — every item was skipped.", "error")
+        return redirect(url_for("dashboard.menu_import_page", bid=bid))
+    flash(f"Catalogue built: {items_made} items in {cats_made} "
+          f"categories. 🎉 Review them below.")
+    return redirect(url_for("dashboard.menu_page", bid=bid))
+
+
+# ---------------------------------------------------------------------------
 # FAQs (server-rendered editor)
 # ---------------------------------------------------------------------------
 
@@ -746,7 +846,59 @@ def settings(bid):
             return redirect(url_for("dashboard.settings", bid=bid))
         biz = {**biz, **fields}  # redisplay what they typed
     return render_template("dash_settings.html", biz=biz, bid=bid,
-                           tpl=tpl, tid=tid, tone=tone, error=error)
+                           tpl=tpl, tid=tid, tone=tone, error=error,
+                           brain_on=bool(biz.get("brain_enabled")
+                                         and biz.get("brain_api_key_enc")),
+                           brain_key_set=bool(biz.get("brain_api_key_enc")))
+
+
+# ---------------------------------------------------------------------------
+# bot brain (optional Gemini layer)
+# ---------------------------------------------------------------------------
+
+@bp.route("/business/<int:bid>/brain", methods=["POST"])
+@login_required
+def brain_settings(bid):
+    biz = own_business_or_404(bid)
+    key = (request.form.get("brain_api_key") or "").strip()
+    if key:
+        store().set_brain_key(bid, key)
+    enabled = 1 if request.form.get("brain_enabled") else 0
+    store().update_business(bid, brain_enabled=enabled)
+    if enabled and not (key or biz.get("brain_api_key_enc")):
+        flash("Brain switched on, but no API key is saved yet — add one below.")
+    else:
+        flash("Brain settings saved! 🧠")
+    return redirect(url_for("dashboard.settings", bid=bid))
+
+
+@bp.route("/business/<int:bid>/brain/remove", methods=["POST"])
+@login_required
+def brain_remove(bid):
+    own_business_or_404(bid)
+    store().clear_brain_key(bid)
+    flash("Brain API key removed — the brain is off, rules still work.")
+    return redirect(url_for("dashboard.settings", bid=bid))
+
+
+@bp.route("/business/<int:bid>/brain/test", methods=["POST"])
+@login_required
+def brain_test(bid):
+    """Try the brain with the saved key; returns JSON {ok, reply|error}."""
+    own_business_or_404(bid)
+    import brain as brain_mod
+    key = store().get_brain_key(bid)
+    if not key:
+        return {"ok": False, "error": "No API key saved yet."}, 400
+    bundle = store().get_business_bundle(bid)
+    prompt = (request.get_json(silent=True) or {}).get("prompt") \
+        or "Hi! Tell me about yourself in one short line."
+    reply = brain_mod.chat(key, bundle, [], prompt,
+                           bundle.get("language") or "en")
+    if not reply:
+        return {"ok": False,
+                "error": "The API didn't answer — check the key and try again."}, 502
+    return {"ok": True, "reply": reply}
 
 
 # ---------------------------------------------------------------------------
@@ -771,8 +923,10 @@ def preview(bid):
 @login_required
 def connect(bid):
     biz = own_business_or_404(bid)
+    tid, tpl, tone = _tpl(biz)
     return render_template(
-        "dash_connect.html", biz=biz, bid=bid,
+        "dash_connect.html", biz=biz, bid=bid, tpl=tpl, tid=tid,
+        is_personal=(tid == "personal"),
         pnid=biz.get("whatsapp_phone_number_id") or "",
         token_set=bool(biz.get("whatsapp_token_enc")),
         demo=_demo_mode(),

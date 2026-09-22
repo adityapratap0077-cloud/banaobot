@@ -401,6 +401,8 @@ class Store:
             "label_unit_en": "TEXT NOT NULL DEFAULT ''",
             "label_unit_hi": "TEXT NOT NULL DEFAULT ''",
             "tone": "TEXT NOT NULL DEFAULT ''",
+            "brain_api_key_enc": "TEXT NOT NULL DEFAULT ''",
+            "brain_enabled": "INTEGER NOT NULL DEFAULT 0",
         }
         for col, col_ddl in ddl.items():
             if col not in cols:
@@ -605,6 +607,7 @@ class Store:
         "label_book_en", "label_book_hi",
         "label_unit_en", "label_unit_hi",
         "tone",
+        "brain_enabled",
     )
 
     def create_business(self, user_id, name, template_id="restaurant", **kwargs):
@@ -707,6 +710,27 @@ class Store:
         if not biz or not biz.get("whatsapp_token_enc"):
             return ""
         return decrypt_token(biz["whatsapp_token_enc"])
+
+    # -- brain (Gemini API key, encrypted at rest like WhatsApp tokens) -----
+    def set_brain_key(self, business_id, key_plain):
+        with self._cur() as cur:
+            cur.execute(
+                "UPDATE businesses SET brain_api_key_enc=? WHERE id=?",
+                (encrypt_token(key_plain), business_id),
+            )
+
+    def get_brain_key(self, business_id):
+        biz = self.get_business(business_id)
+        if not biz or not biz.get("brain_api_key_enc"):
+            return ""
+        return decrypt_token(biz["brain_api_key_enc"])
+
+    def clear_brain_key(self, business_id):
+        with self._cur() as cur:
+            cur.execute(
+                "UPDATE businesses SET brain_api_key_enc='', brain_enabled=0 "
+                "WHERE id=?", (business_id,),
+            )
 
     # -- menu ------------------------------------------------------------
     def add_category(self, business_id, name_en, name_hi="", emoji="\U0001F37D\uFE0F"):
@@ -902,6 +926,9 @@ class Store:
             "tpl": self._build_tpl(biz),
             "menu": menu,
             "faqs": faqs,
+            "brain_enabled": bool(biz.get("brain_enabled")),
+            "brain_key": (self.get_brain_key(business_id)
+                          if biz.get("brain_enabled") else ""),
         }
 
     # -- template merge helper ---------------------------------------------
@@ -967,14 +994,25 @@ class Store:
             data = json.loads(row["data"])
         except (ValueError, TypeError):
             data = {}
-        return {"lang": row["lang"], "state": row["state"], "data": data}
+        session = {"lang": row["lang"], "state": row["state"], "data": data}
+        # top-level session keys stashed under reserved names at save time
+        for k in ("lang_locked", "hist"):
+            sk = "_sess_" + k
+            if isinstance(data, dict) and sk in data:
+                session[k] = data.pop(sk)
+        return session
 
     def save_session(self, phone, session, business_id=None):
         """Persist a session dict. Strips the transient '_events' key."""
         business_id = self._biz(business_id)
         session = dict(session or {})
         session.pop("_events", None)
-        data = json.dumps(session.get("data", {}), ensure_ascii=False)
+        data_dict = dict(session.get("data", {}) or {})
+        # stash top-level session keys so they survive the round-trip
+        for k in ("lang_locked", "hist"):
+            if k in session:
+                data_dict["_sess_" + k] = session[k]
+        data = json.dumps(data_dict, ensure_ascii=False)
         with self._cur() as cur:
             cur.execute(
                 """INSERT INTO sessions
