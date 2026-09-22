@@ -18,6 +18,7 @@ Hard rules this module follows:
 
 import os
 import re
+import secrets
 from datetime import datetime
 from functools import wraps
 
@@ -112,6 +113,107 @@ def _err(msg, code=400):
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
+# ---------------------------------------------------------------------------
+# Google sign-in (optional; enabled via GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET)
+# ---------------------------------------------------------------------------
+
+_GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+_GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+_GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
+
+
+def _google_session(redirect_uri=None):
+    """Build an OAuth2 session for Google, or None when sign-in is disabled.
+
+    Disabled when GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are absent (the
+    Google button is then hidden and the /oauth/google routes bounce back
+    to login) or when authlib isn't installed.
+    """
+    cid = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+    csec = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+    if not cid or not csec:
+        return None
+    try:
+        from authlib.integrations.requests_client import OAuth2Session
+    except ImportError:
+        return None
+    return OAuth2Session(client_id=cid, client_secret=csec,
+                         redirect_uri=redirect_uri,
+                         scope="openid email profile")
+
+
+def _google_enabled():
+    return _google_session() is not None
+
+
+def _unusable_password():
+    """Password hash that can never validate (for Google-only accounts)."""
+    return "!unusable-" + secrets.token_hex(16)
+
+
+@bp.route("/oauth/google")
+def google_login():
+    redirect_uri = url_for("dashboard.google_callback", _external=True)
+    gs = _google_session(redirect_uri)
+    if gs is None:
+        flash("Google sign-in isn't set up on this site yet.")
+        return redirect(url_for("dashboard.login"))
+    state = secrets.token_urlsafe(16)
+    session["oauth_state"] = state
+    auth_url, _ = gs.create_authorization_url(_GOOGLE_AUTH_URL, state=state)
+    return redirect(auth_url)
+
+
+@bp.route("/oauth/google/callback")
+def google_callback():
+    redirect_uri = url_for("dashboard.google_callback", _external=True)
+    gs = _google_session(redirect_uri)
+    if gs is None:
+        return redirect(url_for("dashboard.login"))
+    state = session.pop("oauth_state", None)
+    if (not state or request.args.get("state") != state
+            or "code" not in request.args):
+        flash("Google sign-in didn't work — please try again.")
+        return redirect(url_for("dashboard.login"))
+    try:
+        gs.fetch_token(_GOOGLE_TOKEN_URL, authorization_response=request.url)
+        me = gs.get(_GOOGLE_USERINFO_URL).json()
+    except Exception:
+        flash("Google sign-in didn't work — please try again.")
+        return redirect(url_for("dashboard.login"))
+    sub = (me.get("sub") or "").strip()
+    email = (me.get("email") or "").strip().lower()
+    if not sub or not email or not me.get("email_verified"):
+        flash("Google didn't share a verified email — try another way in.")
+        return redirect(url_for("dashboard.login"))
+
+    st = store()
+    user = st.get_user_by_google_sub(sub)
+    is_new = False
+    if user is None:
+        user = st.get_user_by_email(email)
+        if user is None:
+            uid = st.create_user(email, _unusable_password(), google_sub=sub)
+            if uid is None:  # lost a race — fall back to the email row
+                user = st.get_user_by_email(email)
+            else:
+                user = st.get_user(uid)
+                is_new = True
+        if user and not user.get("google_sub"):
+            st.set_google_sub(user["id"], sub)
+    if user is None:  # pragma: no cover - defensive
+        flash("Couldn't create your account — please try again.")
+        return redirect(url_for("dashboard.login"))
+
+    session.clear()
+    session["user_id"] = user["id"]
+    session["email"] = user["email"]
+    if is_new:
+        flash("Welcome to BanaoBot! Let's set up your first business. 🎉")
+        return redirect(url_for("dashboard.onboarding"))
+    return redirect(url_for("dashboard.index"))
+
+
 @bp.app_template_filter("ts")
 def _fmt_ts(value):
     """Epoch seconds -> '23 Sep 2026, 02:10 PM'."""
@@ -150,7 +252,9 @@ def signup():
                 session["email"] = email
                 flash("Welcome to BanaoBot! Let's set up your first business. 🎉")
                 return redirect(url_for("dashboard.onboarding"))
-    return render_template("dash_signup.html", error=error)
+    return render_template(
+        "dash_signup.html", error=error,
+        google_enabled=_google_enabled())
 
 
 @bp.route("/login", methods=["GET", "POST"])
@@ -169,7 +273,9 @@ def login():
             session["user_id"] = user["id"]
             session["email"] = user["email"]
             return redirect(url_for("dashboard.index"))
-    return render_template("dash_login.html", error=error)
+    return render_template(
+        "dash_login.html", error=error,
+        google_enabled=_google_enabled())
 
 
 @bp.route("/logout")

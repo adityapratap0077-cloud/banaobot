@@ -19,6 +19,8 @@
       </label>
       <button class="btn block" type="submit">Create account →</button>
     </form>
+    {% set google_label = "Sign up with Google" %}
+    {% include "_google_btn.html" %}
   </div>
   <p class="alt">Already have an account? <a href="{{ url_for('dashboard.login') }}">Log in</a></p>
 </div>

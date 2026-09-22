@@ -40,6 +40,14 @@ from storage import Store
 app = Flask(__name__)
 app.secret_key = os.environ.get("BANAOBOT_SECRET", "banaobot-dev-key-change-me")
 
+# Behind Render/any reverse proxy: trust X-Forwarded-* so url_for(_external=True)
+# builds https:// URLs (required for OAuth redirect URIs).
+try:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+except ImportError:  # pragma: no cover - werkzeug ships with Flask
+    pass
+
 DEMO_MODE = os.environ.get("DEMO_MODE", "true").lower() in ("1", "true", "yes")
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "")
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")

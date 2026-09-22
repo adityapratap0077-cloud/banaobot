@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     email         TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
+    google_sub    TEXT UNIQUE,
     created_at    INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS businesses (
@@ -250,9 +251,18 @@ class Store:
             for t in _OLD_TABLES:
                 self._conn.execute(f"DROP TABLE IF EXISTS {t}")
             self._conn.commit()
+        self._migrate_users_google_sub()
         if fresh:
             self._seed_bhoj_house()
             self._seed_aditya()
+
+    def _migrate_users_google_sub(self):
+        """Add users.google_sub to DBs created before Google sign-in."""
+        try:
+            self._conn.execute("ALTER TABLE users ADD COLUMN google_sub TEXT")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
     def _seed_aditya(self):
         """Seed Aditya Pratap's personal creator bot (business #2).
@@ -541,16 +551,17 @@ class Store:
         return business_id if business_id is not None else self.get_default_business_id()
 
     # -- users -----------------------------------------------------------
-    def create_user(self, email, password_hash):
+    def create_user(self, email, password_hash, google_sub=None):
         with self._cur() as cur:
             try:
                 cur.execute(
-                    "INSERT INTO users (email, password_hash, created_at)"
-                    " VALUES (?,?,?)",
-                    (email.strip().lower(), password_hash, int(time.time())),
+                    "INSERT INTO users (email, password_hash, google_sub, created_at)"
+                    " VALUES (?,?,?,?)",
+                    (email.strip().lower(), password_hash, google_sub,
+                     int(time.time())),
                 )
             except sqlite3.IntegrityError:
-                return None  # email already taken
+                return None  # email (or google_sub) already taken
             return cur.lastrowid
 
     def get_user_by_email(self, email):
@@ -559,6 +570,24 @@ class Store:
                 "SELECT * FROM users WHERE email=?", (email.strip().lower(),)
             ).fetchone()
         return dict(row) if row else None
+
+    def get_user_by_google_sub(self, sub):
+        with self._cur() as cur:
+            row = cur.execute(
+                "SELECT * FROM users WHERE google_sub=?", (sub,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def set_google_sub(self, user_id, sub):
+        """Link a Google account to an existing email/password user."""
+        with self._cur() as cur:
+            try:
+                cur.execute(
+                    "UPDATE users SET google_sub=? WHERE id=?", (sub, user_id)
+                )
+            except sqlite3.IntegrityError:
+                return False  # this Google account is linked elsewhere
+            return cur.rowcount > 0
 
     def get_user(self, user_id):
         with self._cur() as cur:
