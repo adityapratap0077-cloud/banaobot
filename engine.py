@@ -42,6 +42,11 @@ import copy
 import re
 import uuid
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+# "today"/"tomorrow" are interpreted in the bot's home timezone (IST);
+# the hosting server's clock (often UTC) can be a day behind in the morning.
+_HOME_TZ = ZoneInfo("Asia/Kolkata")
 
 import phrasing
 import templates
@@ -974,9 +979,9 @@ def _emit(session, events):
 
 def handle_message(phone, text, session, business=None, today=None):
     """See module docstring. business=None -> Bhoj House demo business.
-    today defaults to date.today() (injectable for tests)."""
+    today defaults to the current date in Asia/Kolkata (injectable for tests)."""
     biz = business if business is not None else default_business()
-    today = today or date.today()
+    today = today or datetime.now(_HOME_TZ).date()
     if session:
         session = copy.deepcopy(session)
     else:
