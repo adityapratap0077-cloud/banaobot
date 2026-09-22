@@ -1,0 +1,27 @@
+{% extends "dash_base.html" %}
+{% block title %}New business · What best describes you?{% endblock %}
+{% block head %}
+<style>
+  .tplgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;}
+  .tplcard{display:block;border:2px solid #e2e8f0;border-radius:16px;padding:20px 16px;text-align:center;
+           text-decoration:none;color:inherit;background:#fff;transition:all .15s;}
+  .tplcard:hover{border-color:var(--brand);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.08);}
+  .tplcard .emoji{font-size:42px;display:block;margin-bottom:10px;}
+  .tplcard b{font-size:17px;display:block;margin-bottom:6px;}
+  .tplcard span{font-size:13px;color:#64748b;}
+</style>
+{% endblock %}
+{% block content %}
+{% with step=0 %}{% include "dash_steps.html" %}{% endwith %}
+<div class="pagehead"><div><h1>What best describes you? 🤔</h1><p>Step 0 of 6 — pick the bot that fits your work. Everything after this adapts.</p></div></div>
+{% if error %}<div class="formerror">{{ error }}</div>{% endif %}
+<div class="tplgrid">
+  {% for tpl in templates %}
+  <a class="tplcard" href="{{ url_for('dashboard.onboarding_basics', template=tpl.id) }}">
+    <span class="emoji">{{ tpl.emoji }}</span>
+    <b>{{ tpl.name }}</b>
+    <span>{{ tpl.blurb }}</span>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

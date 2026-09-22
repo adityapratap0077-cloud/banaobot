@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Local dev database — never commit (holds test accounts/bookings)
+bot.db
+bot.db-*
+*.db
+
+# Secrets / env
+.env
+.env.*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

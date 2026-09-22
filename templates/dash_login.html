@@ -1,0 +1,22 @@
+{% extends "dash_base.html" %}
+{% block title %}Log in{% endblock %}
+{% block content %}
+<div class="authbox">
+  <div class="logo">🤖 BanaoBot</div>
+  <p class="sub">Welcome back — your bots missed you.</p>
+  <div class="card">
+    <h2>Log in</h2>
+    {% if error %}<div class="formerror">{{ error }}</div>{% endif %}
+    <form method="post">
+      <label class="f">Email
+        <input type="email" name="email" required autocomplete="email" placeholder="you@example.com">
+      </label>
+      <label class="f">Password
+        <input type="password" name="password" required autocomplete="current-password" placeholder="Your password">
+      </label>
+      <button class="btn block" type="submit">Log in →</button>
+    </form>
+  </div>
+  <p class="alt">New here? <a href="{{ url_for('dashboard.signup') }}">Create an account</a></p>
+</div>
+{% endblock %}

@@ -1,0 +1,90 @@
+{% extends "dash_base.html" %}
+{% block title %}{{ biz.name }} · Settings{% endblock %}
+{% block content %}
+<a class="backlink" href="{{ url_for('dashboard.business_home', bid=bid) }}">← {{ biz.name }}</a>
+<div class="pagehead"><div><h1>Settings ⚙️</h1><p>Everything the bot says and knows about your business.</p></div></div>
+<div class="card">
+  {% if error %}<div class="formerror">{{ error }}</div>{% endif %}
+  <form method="post">
+    <div class="alert" style="border-color:#cbd5e1; background:#f8fafc;">
+      {{ tpl.emoji }} <b>{{ tpl.name }}</b> bot
+      <span class="muted">· bot type is fixed after creation</span>
+    </div>
+    <label class="f">Business name *
+      <input type="text" name="name" required value="{{ biz.name }}">
+    </label>
+    <div class="row2">
+      <label class="f">Tagline (English)<input type="text" name="tagline_en" value="{{ biz.tagline_en or '' }}"></label>
+      <label class="f">Tagline (Hindi)<input type="text" name="tagline_hi" value="{{ biz.tagline_hi or '' }}"></label>
+    </div>
+    <div class="row2">
+      <label class="f">Default language
+        <select name="language">
+          <option value="en" {% if biz.language=='en' %}selected{% endif %}>English</option>
+          <option value="hi" {% if biz.language=='hi' %}selected{% endif %}>हिन्दी (Hindi)</option>
+        </select>
+      </label>
+      <label class="f">Bot tone
+        <select name="tone">
+          <option value="" {% if not biz.tone %}selected{% endif %}>Default ({{ tpl.default_tone|capitalize }})</option>
+          <option value="friendly" {% if biz.tone=='friendly' %}selected{% endif %}>Friendly 😊</option>
+          <option value="professional" {% if biz.tone=='professional' %}selected{% endif %}>Professional 🤝</option>
+          <option value="casual" {% if biz.tone=='casual' %}selected{% endif %}>Casual 😎</option>
+        </select>
+        <span class="hint">How the bot talks — warm, polished, or chill.</span>
+      </label>
+    </div>
+    <label class="f" style="display:flex; align-items:center; gap:10px;">
+      <input type="checkbox" name="booking_enabled" value="1" {% if biz.booking_enabled %}checked{% endif %} style="width:auto; margin:0;">
+      <span>Enable date/time booking flow
+        <span class="hint" style="display:block;">Off → the action button starts an <b>enquiry</b> (items → name → phone → owner alert) instead.</span>
+      </span>
+    </label>
+    <h2 style="margin-top:18px;">Bot wording</h2>
+    <p class="muted" style="margin-top:-6px;">Leave blank to use the {{ tpl.name|lower }} defaults.</p>
+    <div class="row2">
+      <label class="f">Catalog button (English)
+        <input type="text" name="label_catalog_en" maxlength="20" value="{{ biz.label_catalog_en or '' }}" placeholder="{{ tpl.btn_catalog.en }}">
+      </label>
+      <label class="f">Catalog button (Hindi)
+        <input type="text" name="label_catalog_hi" maxlength="20" value="{{ biz.label_catalog_hi or '' }}" placeholder="{{ tpl.btn_catalog.hi }}">
+      </label>
+    </div>
+    <div class="row2">
+      <label class="f">Action button (English)
+        <input type="text" name="label_book_en" maxlength="20" value="{{ biz.label_book_en or '' }}" placeholder="{{ tpl.btn_action.en }}">
+      </label>
+      <label class="f">Action button (Hindi)
+        <input type="text" name="label_book_hi" maxlength="20" value="{{ biz.label_book_hi or '' }}" placeholder="{{ tpl.btn_action.hi }}">
+      </label>
+    </div>
+    <div class="row2">
+      <label class="f">Booking unit (English)
+        <input type="text" name="label_unit_en" value="{{ biz.label_unit_en or '' }}" placeholder="{{ tpl.unit.en }}">
+        <span class="hint">e.g. guests, students, patients</span>
+      </label>
+      <label class="f">Booking unit (Hindi)
+        <input type="text" name="label_unit_hi" value="{{ biz.label_unit_hi or '' }}" placeholder="{{ tpl.unit.hi }}">
+      </label>
+    </div>
+    <div class="row2">
+      <label class="f">Opens at<input type="time" name="hours_open" value="{{ biz.hours_open or '11:00' }}"></label>
+      <label class="f">Closes at<input type="time" name="hours_close" value="{{ biz.hours_close or '23:00' }}"></label>
+    </div>
+    <label class="f">Last booking time
+      <input type="time" name="last_booking" value="{{ biz.last_booking or '22:30' }}">
+      <span class="hint">The bot won't accept bookings after this.</span>
+    </label>
+    <label class="f">Address (English)<input type="text" name="address_en" value="{{ biz.address_en or '' }}"></label>
+    <label class="f">Address (Hindi)<input type="text" name="address_hi" value="{{ biz.address_hi or '' }}"></label>
+    <label class="f">Google Maps link<input type="text" name="maps_link" inputmode="url" value="{{ biz.maps_link or '' }}"></label>
+    <label class="f">Owner phone
+      <input type="text" name="owner_phone" inputmode="tel" value="{{ biz.owner_phone or '' }}">
+      <span class="hint">Handoff alerts go here.</span>
+    </label>
+    <label class="f">Welcome (English)<textarea name="welcome_en" rows="4">{{ biz.welcome_en or '' }}</textarea></label>
+    <label class="f">Welcome (Hindi)<textarea name="welcome_hi" rows="4">{{ biz.welcome_hi or '' }}</textarea></label>
+    <button class="btn block" type="submit">Save settings</button>
+  </form>
+</div>
+{% endblock %}

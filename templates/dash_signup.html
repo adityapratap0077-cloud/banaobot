@@ -1,0 +1,25 @@
+{% extends "dash_base.html" %}
+{% block title %}Sign up{% endblock %}
+{% block content %}
+<div class="authbox">
+  <div class="logo">🤖 BanaoBot</div>
+  <p class="sub">Your restaurant's WhatsApp chatbot — set up in minutes, no code.</p>
+  <div class="card">
+    <h2>Create your account</h2>
+    {% if error %}<div class="formerror">{{ error }}</div>{% endif %}
+    <form method="post">
+      <label class="f">Email
+        <input type="email" name="email" required autocomplete="email" placeholder="you@example.com">
+      </label>
+      <label class="f">Password
+        <input type="password" name="password" required minlength="6" autocomplete="new-password" placeholder="Min. 6 characters">
+      </label>
+      <label class="f">Confirm password
+        <input type="password" name="confirm" required autocomplete="new-password" placeholder="Repeat password">
+      </label>
+      <button class="btn block" type="submit">Create account →</button>
+    </form>
+  </div>
+  <p class="alt">Already have an account? <a href="{{ url_for('dashboard.login') }}">Log in</a></p>
+</div>
+{% endblock %}

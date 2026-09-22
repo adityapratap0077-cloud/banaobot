@@ -1,0 +1,14 @@
+# Render blueprint — `render.yaml` in repo root is auto-detected on first deploy.
+services:
+  - type: web
+    name: banaobot
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server:app --bind 0.0.0.0:$PORT --workers 2
+    envVars:
+      - key: DEMO_MODE
+        value: "true"
+      - key: BANAOBOT_SECRET
+        generateValue: true

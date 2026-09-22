@@ -1,0 +1,32 @@
+{% extends "dash_base.html" %}
+{% block title %}My businesses{% endblock %}
+{% block content %}
+<div class="pagehead">
+  <div>
+    <h1>My businesses</h1>
+    <p>Each business gets its own WhatsApp chatbot, menu and bookings.</p>
+  </div>
+</div>
+{% if cards %}
+<div class="bizgrid">
+  {% for c in cards %}
+  <a class="bizcard" href="{{ url_for('dashboard.business_home', bid=c.biz.id) }}">
+    <span class="badge st-{{ c.biz.status }}">{{ c.biz.status }}</span>
+    <h3>{{ c.biz.name }}</h3>
+    <div class="stats">
+      <div class="stat"><b>{{ c.bookings }}</b><span>bookings</span></div>
+      <div class="stat"><b>{{ c.alerts }}</b><span>handoff alerts</span></div>
+      <div class="stat"><b>{{ c.messages }}</b><span>messages</span></div>
+    </div>
+  </a>
+  {% endfor %}
+  <a class="bizcard newcard" href="{{ url_for('dashboard.onboarding') }}">＋ New business</a>
+</div>
+{% else %}
+<div class="card empty">
+  <p style="font-size:40px; margin:0 0 8px;">🍽️</p>
+  <p><b>No businesses yet.</b><br>Create your first one and BanaoBot will build its WhatsApp chatbot.</p>
+  <a class="btn" href="{{ url_for('dashboard.onboarding') }}">＋ New business</a>
+</div>
+{% endif %}
+{% endblock %}
