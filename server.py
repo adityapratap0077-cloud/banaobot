@@ -58,30 +58,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 store = Store(os.environ.get("BANAOBOT_DB", os.path.join(BASE_DIR, "bot.db")))
 app.config["store"] = store  # dashboard blueprint reads the store from here
 
-
-@app.route("/app/_diag")
-def _diag():  # TEMP diagnostic — returns booleans + error text only, no secrets
-    info = {
-        "google_cid_set": bool(os.environ.get("GOOGLE_CLIENT_ID", "").strip()),
-        "google_csec_set": bool(os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()),
-    }
-    try:
-        import authlib
-        info["authlib_version"] = getattr(authlib, "__version__", "?")
-    except Exception as e:
-        info["authlib_import_error"] = f"{type(e).__name__}: {e}"
-    try:
-        from authlib.integrations.requests_client import OAuth2Session  # noqa
-        info["requests_client_ok"] = True
-    except Exception as e:
-        info["requests_client_error"] = f"{type(e).__name__}: {e}"
-    try:
-        import cryptography
-        info["cryptography_version"] = getattr(cryptography, "__version__", "?")
-    except Exception as e:
-        info["cryptography_error"] = f"{type(e).__name__}: {e}"
-    return jsonify(info)
-
 # Self-serve dashboard (auth, onboarding wizard, menu builder, preview...).
 # Import is optional so the bot core keeps running even if dashboard.py
 # is absent or being edited.

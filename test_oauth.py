@@ -40,6 +40,22 @@ def check(cond, label):
     print(f"  ok: {label}")
 
 
+print("== real dependency chain (no mocks) ==")
+# Calls the true dashboard._google_session (later tests monkeypatch it, so this
+# runs first). Catches a repeat of the live incident where authlib was
+# installed but its `requests` integration was not.
+from dashboard import _google_session as _true_session
+os.environ["GOOGLE_CLIENT_ID"] = "x"
+os.environ["GOOGLE_CLIENT_SECRET"] = "y"
+try:
+    _sess = _true_session("https://example.com/cb")
+    check(_sess is not None,
+          "real _google_session builds with env set (authlib+requests importable)")
+finally:
+    del os.environ["GOOGLE_CLIENT_ID"]
+    del os.environ["GOOGLE_CLIENT_SECRET"]
+
+
 def fresh_client():
     store = Store(":memory:")
     server.store = store
