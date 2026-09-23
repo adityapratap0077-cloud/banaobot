@@ -16,12 +16,17 @@ Public API:
   chat(api_key, bundle, history, user_text, lang) -> str | None
       Ask Gemini. history = [(role, text), ...] with role in
       {"user", "model"}. Returns the reply text, or None on any failure.
+  chat_with_error(api_key, bundle, history, user_text, lang)
+      -> (str | None, str | None)
+      Same as chat, but also returns a short key-free error description
+      (HTTP status + Google's message) for the owner's diagnostics.
   build_system_prompt(bundle) -> str
       The business-aware system prompt: identity, catalogue, FAQs, hours,
       tone and guardrails.
 """
 
 import json
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -108,10 +113,39 @@ RULES — follow them strictly:
 7. If someone is rude or asks for something impossible, stay kind, brief, and steer back to how you can help."""
 
 
-def chat(api_key, bundle, history, user_text, lang="en"):
-    """Ask Gemini for a reply. Returns text, or None on any failure."""
-    if not (api_key or "").strip() or not (user_text or "").strip():
-        return None
+def _google_error_msg(body):
+    """Pull a short human-readable message out of a Google error body."""
+    try:
+        err = json.loads(body).get("error") or {}
+        msg = err.get("message") or ""
+        status = err.get("status") or ""
+        bits = [b for b in (status, msg) if b]
+        if bits:
+            return " — ".join(bits)[:280]
+    except (ValueError, AttributeError):
+        pass
+    return (body or "").strip()[:280]
+
+
+def _block_reason(data):
+    try:
+        fb = data.get("promptFeedback") or {}
+        return fb.get("blockReason") or "unknown"
+    except AttributeError:
+        return "unknown"
+
+
+def chat_with_error(api_key, bundle, history, user_text, lang="en"):
+    """Ask Gemini. Returns (reply_text_or_None, error_detail_or_None).
+
+    error_detail is a short, key-free description of the failure
+    (HTTP status + Google's error message), safe to show the bot owner
+    for diagnostics. It never contains the API key.
+    """
+    if not (api_key or "").strip():
+        return None, "no API key saved"
+    if not (user_text or "").strip():
+        return None, "empty prompt"
     system = build_system_prompt(bundle)
     contents = []
     for role, text in (history or [])[-_MAX_HISTORY:]:
@@ -141,12 +175,28 @@ def chat(api_key, bundle, history, user_text, lang="en"):
     )
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8", "replace"))
-    except Exception:
-        return None  # network/timeout/bad key -> rule-based fallback
+            raw = resp.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode("utf-8", "replace")
+        except Exception:
+            body = ""
+        return None, "HTTP %s%s" % (e.code, ": " + _google_error_msg(body)
+                                    if body else "")
+    except Exception as e:  # network/timeout/DNS -> rule-based fallback
+        return None, "request failed: %s" % type(e).__name__
     try:
+        data = json.loads(raw)
         parts = data["candidates"][0]["content"]["parts"]
         text = "".join(p.get("text", "") for p in parts).strip()
-        return text or None
-    except (KeyError, IndexError, TypeError):
-        return None
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None, "unparseable response from the API"
+    if not text:
+        return None, "API returned no text (block reason: %s)" % _block_reason(data)
+    return text, None
+
+
+def chat(api_key, bundle, history, user_text, lang="en"):
+    """Ask Gemini for a reply. Returns text, or None on any failure."""
+    text, _ = chat_with_error(api_key, bundle, history, user_text, lang)
+    return text

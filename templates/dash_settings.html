@@ -136,7 +136,9 @@
       fetch('{{ url_for('dashboard.brain_test', bid=bid) }}', {method: 'POST'})
         .then(function(r){ return r.json().then(function(j){ return {s: r.ok, j: j}; }); })
         .then(function(res){
-          out.textContent = res.s ? ('🧠 ' + res.j.reply) : ('⚠️ ' + (res.j.error || 'Failed.'));
+          out.textContent = res.s ? ('🧠 ' + res.j.reply)
+            : ('⚠️ ' + (res.j.error || 'Failed.')
+               + (res.j.detail ? '\n\nDetail: ' + res.j.detail : ''));
           btn.disabled = false;
         })
         .catch(function(){ out.textContent = '⚠️ Could not reach the server.'; btn.disabled = false; });

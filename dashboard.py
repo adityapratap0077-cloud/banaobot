@@ -893,11 +893,12 @@ def brain_test(bid):
     bundle = store().get_business_bundle(bid)
     prompt = (request.get_json(silent=True) or {}).get("prompt") \
         or "Hi! Tell me about yourself in one short line."
-    reply = brain_mod.chat(key, bundle, [], prompt,
-                           bundle.get("language") or "en")
+    reply, err = brain_mod.chat_with_error(key, bundle, [], prompt,
+                                               bundle.get("language") or "en")
     if not reply:
         return {"ok": False,
-                "error": "The API didn't answer — check the key and try again."}, 502
+                "error": "The API didn't answer — check the key and try again.",
+                "detail": (err or "unknown error")[:300]}, 502
     return {"ok": True, "reply": reply}
 
 
