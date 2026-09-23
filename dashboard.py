@@ -316,14 +316,18 @@ def site_fetch():
     brief = sitefetch.extract_brief(html, final_url)
     theme = sitefetch.detect_theme(html, final_url)
     prompt = sitefetch.build_prompt_from_brief(brief, final_url)
-    return jsonify({
+    resp = {
         "ok": True,
         "name": brief.get("name") or "My bot",
         "prompt": prompt,
         "theme_color": theme.get("primary"),
         "logo": theme.get("logo"),
         "url": final_url,
-    })
+        "thin": bool(brief.get("thin")),
+    }
+    if brief.get("thin"):
+        resp["note"] = sitefetch.THIN_SITE_NOTE
+    return jsonify(resp)
 
 
 @bp.route("/bots/new", methods=["GET", "POST"])
@@ -399,7 +403,13 @@ def bot_delete(bid):
 @bp.route("/bots/<bid>/chat", methods=["POST"])
 @login_required
 def bot_chat(bid):
-    """Owner preview chat: JSON {message} -> {ok, reply}."""
+    """Owner preview chat: JSON {message} -> {ok, reply}.
+
+    Uses the explained brain call so the owner gets a plain-language
+    diagnosis when their key/quota/network is at fault. The visitor-safe
+    reply is unchanged; the owner note is appended below it and is never
+    stored in the conversation history (so Gemini never sees it).
+    """
     bot = own_bot_or_404(bid)
     body = _json_body()
     message = (body.get("message") or "").strip()
@@ -407,11 +417,14 @@ def bot_chat(bid):
         return _err("Type a message first.")
     key = store().get_user_brain_key(session["user_id"])
     history = session.get("preview_history_%d" % bot["id"], [])
-    reply = brain.chat_with_prompt(key, bot["name"], bot["prompt"],
-                                   history, message)
+    reply, err_code = brain.chat_with_prompt_explained(
+        key, bot["name"], bot["prompt"], history, message)
+    note = brain.owner_note_for(err_code)
     history = (history + [("user", message[:1500]),
                           ("model", reply[:1500])])[-16:]
     session["preview_history_%d" % bot["id"]] = history
+    if note:
+        reply = reply + "\n\n" + note
     return jsonify({"ok": True, "reply": reply})
 
 

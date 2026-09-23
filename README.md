@@ -63,8 +63,13 @@ Then open:
 | `http://localhost:5000/b/<token>` | Public chat page (no login needed) |
 
 Set `BANAOBOT_DB` to override the SQLite path (default `bot.db` next to
-`server.py`). `BANAOBOT_SECRET` encrypts credentials and signs sessions;
-`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` enable Google sign-in.
+`server.py`). Set `DATABASE_URL` to use PostgreSQL instead of SQLite
+(e.g. Render's Postgres `DATABASE_URL`): the app then stores users, bots,
+and encrypted keys in Postgres, so data survives deploys and restarts.
+Without `DATABASE_URL` everything runs on SQLite — local dev and all
+tests use SQLite. `BANAOBOT_SECRET` encrypts credentials and signs
+sessions; `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` enable Google
+sign-in.
 
 Run the test suites:
 
@@ -81,6 +86,9 @@ python3 test_whatsapp.py    # WhatsApp connector (webhook verify, message
 python3 test_sitefetch.py   # build-from-website (fetch, brief extraction,
                            # theme detection, prompt generation, SSRF guards,
                            # endpoint, chat theming, column migration)
+python3 test_postgres_compat.py  # storage dual-dialect layer (placeholder
+                           # translation, PG/SQLite DDL, insert_returning_id,
+                           # row normalization) — SQLite only, no live PG
 python3 test_engine.py      # legacy conversation engine core
 python3 test_platform.py    # multi-tenancy, webhooks
 python3 test_templates.py   # legacy template content
@@ -100,6 +108,15 @@ above the manual prompt form. Paste your site's address, hit
    (headings + list items, deduped, ~20), prices (₹/$/€/£ fragments, ~10),
    hours (~5), contact info (phone/email/address, 5), and a one-line tone
    guess. Navigation, header, footer, script, and style noise is ignored.
+   **JavaScript-rendered sites are handled too:** `<noscript>` fallbacks
+   are read, JSON-LD / `__NEXT_DATA__` blocks are parsed for prose, and
+   content-like string literals in JS bundles are harvested (framework
+   boilerplate such as `React.createElement` is filtered out). Paste a
+   bare domain like `example.com` and `https://` is prepended for you.
+   When the recovered text is thin (under ~60 description words and fewer
+   than 3 offerings), the response carries `thin: true` plus an honest
+   note — shown under the fetch block — explaining the site loads its
+   content with JavaScript, so the draft is only a starting point.
 3. **Detects your theme** — `<meta name="theme-color">` first, else the
    most frequent non-gray hex color in the site's CSS; also picks up the
    logo (`og:image` or favicon).
@@ -123,6 +140,13 @@ Honest limitations: JavaScript-heavy sites (content rendered
 client-side) may yield thin briefs — the generated prompt then says so
 and stays gracefully vague instead of hallucinating. You can always edit
 the prompt by hand afterwards.
+
+**Owner preview diagnostics:** when the logged-in owner's preview chat
+fails, the reply appends a plain-language owner-only note (bad brain
+key → re-check Settings → Brain key; quota → wait or check Google AI
+Studio; network → try again shortly; retired models → app update
+needed). Public visitors and WhatsApp chats never see these notes — they
+keep the generic honest messages.
 
 ## Embed on your website
 
@@ -180,11 +204,22 @@ Honest limits:
   history, user_text)`: builds the system prompt from the owner's words and
   calls Gemini with the model fallback chain
   (`gemini-3.6-flash` → `gemini-2.5-flash` → `gemini-2.0-flash`).
-- **`storage.py`** — multi-tenant SQLite: `users`, encrypted
+  `chat_with_prompt_explained(...)` returns `(reply, err_code)` with
+  `err_code` in `no_key | bad_key | quota | network | garbled |
+  models_retired`; `owner_note_for(err_code)` renders the owner-only
+  diagnosis shown in the preview chat. Visitor-facing messages never
+  change and never leak key material.
+- **`storage.py`** — multi-tenant storage: `users`, encrypted
   `user_brain_keys` (one Gemini key per owner), `bots` (name, prompt,
   unguessable `share_token`), `whatsapp_connections` (encrypted Meta
   access token + optional app secret, generated verify token, linked bot,
-  enabled flag).
+  enabled flag). **SQLite by default; PostgreSQL when `DATABASE_URL` is
+  set** (psycopg2). All SQL uses `?` placeholders translated to `%s` for
+  Postgres by a single helper; `insert_returning_id()` covers
+  `lastrowid` vs `RETURNING id`; DDL is dialect-aware (`BIGSERIAL` on
+  Postgres); timestamps are Python-generated UTC ISO strings; rows come
+  back as plain dicts on both drivers. `get_conn()` / `init_db()` are the
+  import surface.
 - **`server.py`** — Flask: landing page, public chat routes
   (`GET /b/<token>` incl. `?embed=1` chrome-free embed mode,
   `POST /b/<token>/chat`), legacy Meta webhook and demo endpoints;
@@ -208,9 +243,14 @@ Honest limits:
 
 ## Production limitations (fix before real clients)
 
-- **Infra** — dev server + SQLite on a free host: data is ephemeral; a
-  restart can erase users, bots, and keys. Use gunicorn + Postgres (or
-  persistent disk) for real traffic.
+- **Infra** — set `DATABASE_URL` and the app runs on Postgres instead of
+  SQLite, so users, bots, and keys survive deploys and restarts (Render's
+  free web-service disk is ephemeral — `bot.db` is wiped on every
+  deploy/restart). Note: Render's **free Postgres also expires** (check
+  the Render dashboard for the date); treat it as semi-durable. The
+  long-term move is a persistent provider (paid Postgres or similar)
+  before real client data depends on it. Without `DATABASE_URL` the app
+  falls back to SQLite — fine for local dev only.
 - **Gemini cost** — every chat message calls the owner's Gemini key. The
   free tier is generous, but heavy traffic needs quota monitoring; add
   per-bot rate limits before real clients.

@@ -21,6 +21,7 @@ Security notes:
 """
 
 import ipaddress
+import json
 import re
 import socket
 from html.parser import HTMLParser
@@ -178,11 +179,15 @@ def fetch_site(url):
 class _BriefHTMLParser(HTMLParser):
     """Collects title, meta, headings, paragraphs, list items, style info.
 
-    Skips <nav>, <header>, <footer>, <aside>, <script>, <style> (content),
-    <noscript> subtrees so menus and chrome don't pollute the brief.
+    Skips <nav>, <header>, <footer>, <aside> subtrees so menus and chrome
+    don't pollute the brief. <noscript> is kept — it is the static
+    fallback content of JS-heavy sites. <script> bodies are captured raw
+    so content-like string literals inside JS bundles can be harvested;
+    <script type="application/ld+json"> and <script id="__NEXT_DATA__">
+    are marked as JSON and parsed separately.
     """
 
-    SKIP = {"script", "style", "nav", "footer", "header", "noscript", "aside"}
+    SKIP = {"style", "nav", "footer", "header", "aside"}
     TEXT_TAGS = {"h1": "h", "h2": "h", "h3": "h", "h4": "h",
                  "h5": "h", "h6": "h", "p": "p", "li": "li"}
 
@@ -197,12 +202,16 @@ class _BriefHTMLParser(HTMLParser):
         self.style_css = []
         self.inline_styles = []
         self.favicons = []
+        self.scripts = []  # list of (kind, text); kind in {"json", "js"}
         self._buf = None
         self._buf_kind = None
         self._buf_cap = 0
         self._skip_depth = 0
         self._in_style_block = False
         self._style_buf = []
+        self._in_script = False
+        self._script_kind = None
+        self._script_buf = []
 
     def _start_buf(self, kind, cap):
         self._buf_kind = kind
@@ -211,12 +220,28 @@ class _BriefHTMLParser(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
+        a = {k.lower(): (v or "") for k, v in attrs}
+        if tag == "script" and not self._skip_depth and not self._in_script:
+            stype = a.get("type", "").lower()
+            if stype == "application/ld+json" or a.get("id") == "__NEXT_DATA__":
+                self._script_kind = "json"
+            else:
+                self._script_kind = "js"
+            self._in_script = True
+            self._script_buf = []
+            return
+        if self._in_script:
+            return  # tags inside JS source are noise
+        if (tag == "style" and not self._skip_depth
+                and not self._in_style_block):
+            self._in_style_block = True
+            self._style_buf = []
+            return
         if tag in self.SKIP:
             self._skip_depth += 1
             return
         if self._skip_depth:
             return
-        a = {k.lower(): (v or "") for k, v in attrs}
         if tag == "title":
             self._in_title = True
         elif tag == "meta":
@@ -229,9 +254,6 @@ class _BriefHTMLParser(HTMLParser):
             href = a.get("href", "").strip()
             if href and "icon" in rel:
                 self.favicons.append(href)
-        elif tag == "style":
-            self._in_style_block = True
-            self._style_buf = []
         elif tag in self.TEXT_TAGS:
             self._start_buf(self.TEXT_TAGS[tag],
                              2000 if tag == "p" else 200)
@@ -240,6 +262,21 @@ class _BriefHTMLParser(HTMLParser):
 
     def handle_endtag(self, tag):
         tag = tag.lower()
+        if tag == "script" and self._in_script:
+            self._in_script = False
+            body = "".join(self._script_buf)
+            if body.strip():
+                self.scripts.append((self._script_kind, body[:500000]))
+            self._script_buf = []
+            self._script_kind = None
+            return
+        if self._in_script:
+            return
+        if tag == "style" and self._in_style_block:
+            self._in_style_block = False
+            self.style_css.append("".join(self._style_buf))
+            self._style_buf = []
+            return
         if tag in self.SKIP:
             self._skip_depth = max(0, self._skip_depth - 1)
             return
@@ -247,10 +284,6 @@ class _BriefHTMLParser(HTMLParser):
             return
         if tag == "title":
             self._in_title = False
-        elif tag == "style" and self._in_style_block:
-            self._in_style_block = False
-            self.style_css.append("".join(self._style_buf))
-            self._style_buf = []
         elif tag in self.TEXT_TAGS and self._buf is not None:
             text = re.sub(r"\s+", " ", "".join(self._buf)).strip()
             if text:
@@ -264,12 +297,17 @@ class _BriefHTMLParser(HTMLParser):
             self._buf_kind = None
 
     def handle_data(self, data):
+        if self._in_script:
+            if len("".join(self._script_buf)) < 500000:
+                self._script_buf.append(data)
+            return
+        if self._in_style_block:
+            self._style_buf.append(data)
+            return
         if self._skip_depth:
             return
         if self._in_title:
             self.title_parts.append(data)
-        elif self._in_style_block:
-            self._style_buf.append(data)
         elif self._buf is not None:
             if len("".join(self._buf)) < self._buf_cap:
                 self._buf.append(data)
@@ -314,17 +352,163 @@ def _dedupe(items, cap):
     return out
 
 
-def _fragments_with(parser, predicate, cap, maxlen=140):
+# ---------------------------------------------------------------------------
+# JS-rendered sites: harvest content from script bodies
+# ---------------------------------------------------------------------------
+# React/Vite/Next SPAs often ship an almost-empty <body> — the real copy
+# lives as string literals inside the JS bundles. We recover the
+# content-like ones with a strict filter: 6+ words, mostly letters,
+# no code markers, no framework boilerplate.
+
+_SCRIPT_LITERAL_RE = re.compile(
+    r'"([^"\\\n]{12,400}?)"|\'([^\'\\\n]{12,400}?)\'|`([^`\\\n]{12,400}?)`')
+_CODE_MARKER_RE = re.compile(r"[{}();=<>]{2,}|=>|\bfunction\b|https?://",
+                             re.I)
+_BOILERPLATE_MARKERS = ("React.", "useState", "useEffect", "mousedown",
+                        "addEventListener", "querySelector",
+                        "getElementById", "createElement")
+
+
+def _alpha_ratio(s):
+    s = s or ""
+    if not s:
+        return 0.0
+    return sum(1 for c in s if c.isalpha() or c.isspace()) / len(s)
+
+
+def _content_like(s):
+    """Heuristic: does this JS string literal look like human content?"""
+    s = (s or "").strip()
+    words = re.findall(r"[A-Za-z']+", s)
+    if len(words) < 6:
+        return False
+    if _alpha_ratio(s) < 0.75:
+        return False
+    if _CODE_MARKER_RE.search(s):
+        return False
+    if s.startswith("If you meant"):
+        return False
+    return not any(m in s for m in _BOILERPLATE_MARKERS)
+
+
+def _json_prose(s):
+    """Content filter for strings pulled out of JSON-LD / __NEXT_DATA__.
+
+    Short labels (2+ words) are kept too — a servesCuisine list like
+    "Espresso based drinks" is exactly what feeds the offerings. The
+    description side still only takes strings of 40+ characters, and
+    the alpha-ratio + code-marker filters keep minified JS out.
+    """
+    s = (s or "").strip()
+    words = re.findall(r"[A-Za-z']+", s)
+    if len(words) < 2:
+        return False
+    if _alpha_ratio(s) < 0.7:
+        return False
+    if _CODE_MARKER_RE.search(s):
+        return False
+    return True
+
+
+_JSON_SKIP_KEYS = {"url", "@id", "@type", "image", "logo", "screenshot",
+                   "sameAs"}
+
+
+def _walk_json_strings(obj, depth=0, out=None):
+    """Collect prose strings from a parsed JSON blob (JSON-LD etc.)."""
+    if out is None:
+        out = []
+    if depth > 6 or len(out) >= 80:
+        return out
+    if isinstance(obj, str):
+        if _json_prose(obj):
+            out.append(obj.strip()[:300])
+    elif isinstance(obj, dict):
+        for key, val in obj.items():
+            if key in _JSON_SKIP_KEYS:
+                continue
+            _walk_json_strings(val, depth + 1, out)
+    elif isinstance(obj, (list, tuple)):
+        for val in obj:
+            _walk_json_strings(val, depth + 1, out)
+    return out
+
+
+def _harvest_json_texts(parser):
+    """Prose strings from JSON-LD / __NEXT_DATA__ blocks."""
+    out = []
+    for kind, body in parser.scripts:
+        if kind != "json":
+            continue
+        try:
+            data = json.loads(body)
+        except ValueError:
+            continue
+        out.extend(_walk_json_strings(data))
+    return _dedupe(out, 40)
+
+
+def _harvest_js_texts(parser):
+    """Content-like string literals from plain JS script bodies."""
+    out = []
+    for kind, body in parser.scripts:
+        if kind != "js":
+            continue
+        for m in _SCRIPT_LITERAL_RE.finditer(body):
+            lit = m.group(1) or m.group(2) or m.group(3) or ""
+            if _content_like(lit):
+                out.append(lit.strip()[:300])
+    return _dedupe(out, 40)
+
+
+def _harvest_texts(parser):
+    """Content strings from <script> bodies.
+
+    JSON-LD / __NEXT_DATA__ blocks are parsed as JSON and walked for
+    prose; other scripts are scanned for content-like string literals.
+    Ordered (structured data first), deduped, capped at 40, each
+    truncated to 300 chars.
+    """
+    return _dedupe(_harvest_json_texts(parser) + _harvest_js_texts(parser),
+                   40)
+
+
+def _loose_title_like(s):
+    """Short unpunctuated line from structured data (JSON-LD).
+
+    JSON-LD strings are already high-signal (e.g. a servesCuisine list),
+    so they only need to look like a label, not Title Case.
+    """
+    words = s.split()
+    return (2 <= len(words) <= 12
+            and not re.search(r"[.!?;:]", s))
+
+
+def _title_like(s):
+    """Short headline-ish line that can feed the offerings list."""
+    words = s.split()
+    if not (2 <= len(words) <= 12):
+        return False
+    if re.search(r"[.!?;:]", s):
+        return False
+    # Headlines are usually Title Case; sentence-case menu lines
+    # ("Freshly baked croissants") count too — full sentences carry
+    # punctuation and are already rejected above.
+    caps = sum(1 for w in words if w[:1].isupper())
+    return caps / len(words) >= 0.2
+
+
+def _fragments_with(texts, predicate, cap, maxlen=140):
     found = []
-    for text in parser.headings + parser.items + parser.paragraphs:
+    for text in texts:
         if predicate(text):
             found.append(text[:maxlen])
     return _dedupe(found, cap)
 
 
-def _contacts(parser):
+def _contacts(texts):
     found = []
-    for text in parser.headings + parser.items + parser.paragraphs:
+    for text in texts:
         for m in EMAIL_RE.finditer(text):
             found.append(m.group(0))
         for m in PHONE_RE.finditer(text):
@@ -370,7 +554,10 @@ def extract_brief(html, url):
     """Extract a business brief from page HTML.
 
     Returns a dict: name, tagline, description, offerings, prices, hours,
-    contact, tone. Missing pieces are empty strings/lists — never guessed.
+    contact, tone, thin. ``thin`` is True when the page yielded little
+    readable content (description under 60 words AND fewer than 3
+    offerings) — typically a JS-heavy site. Missing pieces are empty
+    strings/lists — never guessed.
     """
     parser = _parse(html)
     meta = parser.meta
@@ -386,18 +573,32 @@ def extract_brief(html, url):
 
     tagline = meta.get("description") or meta.get("og:description") or ""
 
-    desc_paras = [p for p in parser.paragraphs if len(p) >= 40][:3]
+    # Harvested script content (JSON-LD, __NEXT_DATA__, JS string
+    # literals) extends the plain-HTML text for JS-rendered sites.
+    json_texts = _harvest_json_texts(parser)
+    js_texts = _harvest_js_texts(parser)
+    extra = _dedupe(json_texts + js_texts, 40)
+    long_extra = [e for e in extra if len(e) >= 40]
+
+    desc_paras = [p for p in parser.paragraphs + long_extra
+                  if len(p) >= 40][:5]
     description = "\n\n".join(desc_paras)[:900]
 
     offerings = _dedupe(
         [h for h in parser.headings if 3 <= len(h) <= 80] +
-        [i for i in parser.items if 3 <= len(i) <= 120], 20)
+        [i for i in parser.items if 3 <= len(i) <= 120] +
+        [e for e in json_texts if _loose_title_like(e)] +
+        [e for e in js_texts if _title_like(e)], 20)
 
-    prices = _fragments_with(parser, lambda t: bool(PRICE_RE.search(t)), 10)
+    texts = parser.headings + parser.items + parser.paragraphs + extra
+    prices = _fragments_with(texts, lambda t: bool(PRICE_RE.search(t)), 10)
     hours = _fragments_with(
-        parser,
+        texts,
         lambda t: bool(HOURS_HINT_RE.search(t) and TIME_RE.search(t)), 5)
-    contact = _contacts(parser)
+    contact = _contacts(texts)
+
+    desc_words = len(re.findall(r"[A-Za-z0-9']+", description))
+    thin = desc_words < 60 and len(offerings) < 3
 
     return {
         "name": name.strip(),
@@ -407,8 +608,18 @@ def extract_brief(html, url):
         "prices": prices,
         "hours": hours,
         "contact": contact,
-        "tone": _tone(parser.paragraphs, parser.headings),
+        "tone": _tone(parser.paragraphs + long_extra, parser.headings),
+        "thin": thin,
     }
+
+
+# Shown under the website-import block (and echoed in the generated
+# prompt) when a site yields little readable content.
+THIN_SITE_NOTE = (
+    "Heads up: this site loads most of its content with JavaScript, so I "
+    "could only pull a few details from it. Treat the draft below as a "
+    "starting point — edit it freely, and paste your key offerings, "
+    "prices and hours into the prompt if I missed them.")
 
 
 # ---------------------------------------------------------------------------
@@ -484,7 +695,11 @@ def build_prompt_from_brief(brief, url):
     contact = brief.get("contact") or []
     tone = (brief.get("tone") or "").strip()
 
-    thin = not (offerings or prices or hours or contact or description)
+    explicit_thin = brief.get("thin")
+    if explicit_thin is None:
+        thin = not (offerings or prices or hours or contact or description)
+    else:
+        thin = bool(explicit_thin)
 
     identity = "You are the friendly front-desk host of %s" % name
     if tagline:
@@ -532,10 +747,12 @@ def build_prompt_from_brief(brief, url):
     if thin:
         prompt += (
             "\n\n"
-            "HONESTY NOTE: The website didn't share much detail, so your "
-            "facts are thin. Be upfront about that — never fill the gaps "
-            "with invented specifics. Say \"I don't have that on hand yet\" "
-            "and offer to pass the question to the owner, who can add more "
-            "info to your prompt anytime.")
+            "HONESTY NOTE: This site loads most of its content with "
+            "JavaScript, so I could only pull a few details from it. Treat "
+            "this as a starting point, not the full picture. Be upfront "
+            "about that — never fill the gaps with invented specifics. Say "
+            "\"I don't have that on hand yet\" and offer to pass the "
+            "question to the owner, who can add more info to your prompt "
+            "anytime.")
 
     return prompt

@@ -6,10 +6,11 @@ Covers the prompt-first owner journey:
   settings (brain key save/reject/remove) -> public /b/<token> chat ->
   cross-user isolation (owner-only routes 404 for other users).
 
-brain.chat_with_prompt is monkeypatched globally (dashboard and server both
-`import brain`), so no real Gemini call is ever made. The fake delegates to
-the real function when the owner has no key, exercising the honest
-"not awake" path.
+brain.chat_with_prompt_explained is monkeypatched globally (the dashboard
+preview route calls it), and brain.chat_with_prompt is patched too (the
+public /b/<token>/chat route calls that one), so no real Gemini call is
+ever made. The fakes delegate to the real functions when the owner has no
+key, exercising the honest "not awake" path.
 
 Usage: python3 test_dashboard.py
 Exits non-zero on the first failure. Requires dashboard.py + templates/.
@@ -18,9 +19,12 @@ e.g. the design pass hasn't landed it yet; the suite then exits non-zero at
 the end so the gap is visible instead of silently green.
 """
 
+import io
 import os
 import re
 import sys
+import urllib.error
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -232,25 +236,35 @@ check(r.status_code == 302 and store.has_user_brain_key(uid)
 
 # ------------------------------------------------- (i) preview chat WITH a key (mocked)
 print("== (i) preview chat with a brain key (mocked Gemini) ==")
+real_explained = brain.chat_with_prompt_explained
 real_chat_with_prompt = brain.chat_with_prompt
 calls = []
 
 
-def fake_chat_with_prompt(api_key, bot_name, owner_prompt, history,
-                          user_text):
+def fake_explained(api_key, bot_name, owner_prompt, history, user_text):
     calls.append({"api_key": api_key, "bot_name": bot_name,
                   "owner_prompt": owner_prompt, "history": list(history),
                   "user_text": user_text})
     if not (api_key or "").strip():
         # no key: behave exactly like the real function (honest message)
-        return real_chat_with_prompt(api_key, bot_name, owner_prompt,
-                                     history, user_text)
+        return real_explained(api_key, bot_name, owner_prompt,
+                              history, user_text)
     assert bot_name == BOT_NAME, \
         f"bot name not passed through: {bot_name!r}"
     assert owner_prompt == PROMPT2, "owner prompt not passed through"
+    return "MOCK-REPLY: " + user_text, None
+
+
+def fake_chat_with_prompt(api_key, bot_name, owner_prompt, history,
+                          user_text):
+    # public /b/<token>/chat route: same mock replies, real no-key path
+    if not (api_key or "").strip():
+        return real_chat_with_prompt(api_key, bot_name, owner_prompt,
+                                     history, user_text)
     return "MOCK-REPLY: " + user_text
 
 
+brain.chat_with_prompt_explained = fake_explained
 brain.chat_with_prompt = fake_chat_with_prompt
 
 r = client.post(f"/app/bots/{bid}/chat",
@@ -267,6 +281,35 @@ check(len(hist) >= 2 and hist[-2][0] == "user" and hist[-1][0] == "model"
       and "what's on the menu?" in hist[-2][1]
       and hist[-1][1].startswith("MOCK-REPLY"),
       "second preview message passes the conversation history to the brain")
+
+# ------------------------------------------------- (i2) preview chat owner diagnostics
+print("== (i2) preview chat surfaces an owner-only diagnosis ==")
+brain.chat_with_prompt_explained = real_explained  # real fn, mocked HTTP
+
+
+def bad_key_400(req, timeout=None):
+    raise urllib.error.HTTPError(
+        req.full_url, 400, "Bad Request", {},
+        io.BytesIO(b'{"error":{"code":400,"message":"API key not valid. '
+                   b'Please pass a valid API key.","status":"INVALID_ARGUMENT"}}'))
+
+
+with mock.patch.object(brain.urllib.request, "urlopen", bad_key_400):
+    r = client.post(f"/app/bots/{bid}/chat", json={"message": "hello?"})
+data = r.get_json()
+check(r.status_code == 200 and data["ok"]
+      and "snag reaching my brain" in data["reply"],
+      "bad key: visitor-safe reply text is unchanged")
+check("Owner note" in data["reply"] and "Brain key" in data["reply"],
+      "bad key: preview reply appends an owner-only diagnosis")
+check("INVALID_ARGUMENT" not in data["reply"]
+      and TEST_KEY not in data["reply"],
+      "raw Google error JSON and the key are not leaked into the reply")
+with client.session_transaction() as sess:
+    hist = sess.get("preview_history_%d" % bid, [])
+check(all("Owner note" not in (t or "") for _r, t in hist),
+      "the owner note is not stored in the conversation history")
+brain.chat_with_prompt_explained = fake_explained
 
 # ------------------------------------------------- (j) public share link
 print("== (j) public share link ==")
@@ -350,6 +393,7 @@ t3 = store.get_bot(bid3)["share_token"]
 check(bool(t2) and bool(t3) and t2 != t3,
       "two bots get different share tokens")
 
+brain.chat_with_prompt_explained = real_explained
 brain.chat_with_prompt = real_chat_with_prompt
 
 if SKIPPED:

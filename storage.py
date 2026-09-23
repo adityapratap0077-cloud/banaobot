@@ -28,19 +28,210 @@ apply _events -> save session.
 
 Old single-business databases (the original Bhoj House demo schema) are
 detected on startup and rebuilt: that DB only ever held test data.
+
+Database backend: SQLite by default (local dev + tests). When the
+DATABASE_URL environment variable is set, the app uses PostgreSQL
+instead (psycopg2) — this is how production survives Render's ephemeral
+disk. All SQL is written with `?` placeholders; the _Cursor wrapper
+translates them to `%s` for Postgres, and rows are normalized to plain
+dicts on both drivers so the rest of the code never sees the driver.
+
+Timestamps are generated Python-side as UTC ISO-8601 strings (never
+`datetime('now')` / `now()` in SQL) so both dialects store identical
+values. Booleans are INTEGER 0/1. Each operation commits on its own
+connection — no pooling at this scale; connections are closed by the
+caller via Store.close().
 """
 
 import base64
 import hashlib
 import json
 import os
+import re
 import sqlite3
-import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
+
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:  # local dev / tests without the pg driver
+    psycopg2 = None
 
 import templates
 import sitefetch
 from content import FAQS, MENU, RESTAURANT, STR
+
+
+def _utcnow():
+    """UTC ISO-8601 timestamp, generated Python-side so SQLite and
+    Postgres store the identical value."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def is_postgres():
+    """True when DATABASE_URL is set — the app should use PostgreSQL."""
+    return bool(os.environ.get("DATABASE_URL"))
+
+
+def get_conn(path="bot.db"):
+    """Open a database connection.
+
+    Returns a psycopg2 connection when DATABASE_URL is set, otherwise a
+    sqlite3 connection to `path`. SQLite connections get
+    check_same_thread=False (Flask's dev server is threaded) and foreign
+    keys enforced; Postgres enforces foreign keys by default.
+    """
+    if is_postgres():
+        if psycopg2 is None:
+            raise RuntimeError(
+                "DATABASE_URL is set but psycopg2 is not installed "
+                "(pip install psycopg2-binary)")
+        return psycopg2.connect(os.environ["DATABASE_URL"])
+    conn = sqlite3.connect(path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def dialect_of(conn):
+    """'postgres' or 'sqlite' for a connection from get_conn()."""
+    return ("postgres"
+            if type(conn).__module__.split(".")[0] == "psycopg2"
+            else "sqlite")
+
+
+def _translate_placeholders(sql):
+    """Translate `?` placeholders to `%s` for psycopg2.
+
+    A `?` inside a single-quoted string literal is left alone.
+    """
+    out = []
+    in_str = False
+    i, n = 0, len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch == "'":
+            if in_str and i + 1 < n and sql[i + 1] == "'":
+                out.append("''")
+                i += 2
+                continue
+            in_str = not in_str
+            out.append(ch)
+            i += 1
+            continue
+        out.append("%s" if (ch == "?" and not in_str) else ch)
+        i += 1
+    return "".join(out)
+
+
+class _Cursor:
+    """Driver-agnostic cursor wrapper.
+
+    execute() accepts `?` placeholders on both drivers (translated to
+    `%s` for Postgres); fetchone()/fetchall() return plain dicts (or
+    None) so callers never touch sqlite3.Row / RealDictRow.
+    """
+
+    def __init__(self, conn):
+        self._conn = conn
+        self._pg = dialect_of(conn) == "postgres"
+        if self._pg:
+            self._cur = conn.cursor(
+                cursor_factory=psycopg2.extras.RealDictCursor)
+        else:
+            self._cur = conn.cursor()
+
+    def execute(self, sql, params=()):
+        if self._pg:
+            sql = _translate_placeholders(sql)
+        self._cur.execute(sql, params or ())
+        return self
+
+    def fetchone(self):
+        return self._norm_row(self._cur.fetchone())
+
+    def fetchall(self):
+        return [self._norm_row(r) for r in self._cur.fetchall()]
+
+    def _norm_row(self, row):
+        """Normalize one row to a plain dict.
+
+        sqlite3.Row and psycopg2's RealDictRow both convert via dict();
+        a bare tuple (sqlite connection without the Row factory) is
+        zipped with cursor.description column names.
+        """
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            return dict(row)
+        try:
+            return dict(row)
+        except (TypeError, ValueError):
+            pass
+        cols = [d[0] for d in (self._cur.description or [])]
+        if isinstance(row, (tuple, list)) and len(cols) == len(row):
+            return dict(zip(cols, row))
+        return row
+
+    @property
+    def rowcount(self):
+        return self._cur.rowcount
+
+    @property
+    def lastrowid(self):
+        if self._pg:
+            raise RuntimeError(
+                "lastrowid is SQLite-only; use insert_returning_id()")
+        return self._cur.lastrowid
+
+    def close(self):
+        self._cur.close()
+
+
+def execute(conn, sql, params=()):
+    """Run SQL with `?` placeholders on either driver.
+
+    Returns a _Cursor (rows come back as plain dicts). The caller owns
+    committing/closing the connection; the cursor is closed when
+    garbage-collected, or explicitly via cur.close().
+    """
+    cur = _Cursor(conn)
+    cur.execute(sql, params)
+    return cur
+
+
+def insert_returning_id(conn, sql, params=()):
+    """INSERT a row and return its new id.
+
+    SQLite uses cursor.lastrowid; Postgres gets `RETURNING id`
+    appended. `sql` must be a plain INSERT with `?` placeholders.
+    """
+    cur = _Cursor(conn)
+    try:
+        if cur._pg:
+            cur.execute(sql + " RETURNING id", params)
+            row = cur.fetchone()
+            return row["id"] if row else None
+        cur.execute(sql, params)
+        return cur._cur.lastrowid
+    finally:
+        cur.close()
+
+
+def init_db(path="bot.db"):
+    """Create (or open) the database and return a ready Store.
+
+    Uses Postgres when DATABASE_URL is set, else SQLite at `path`.
+    `python -c "from storage import init_db; init_db()"` friendly.
+    """
+    return Store(path)
+
+
+if psycopg2 is not None:
+    _INTEGRITY_ERRORS = (sqlite3.IntegrityError, psycopg2.IntegrityError)
+else:
+    _INTEGRITY_ERRORS = (sqlite3.IntegrityError,)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -199,6 +390,51 @@ CREATE INDEX IF NOT EXISTS idx_msglog_biz ON message_log(business_id, created_at
 _OLD_TABLES = ("sessions", "bookings", "owner_alerts", "faqs")
 
 
+def _postgres_ddl():
+    """The SCHEMA above translated for PostgreSQL.
+
+    - `INTEGER PRIMARY KEY AUTOINCREMENT` -> `BIGSERIAL PRIMARY KEY`
+      (Postgres has no AUTOINCREMENT keyword)
+    - created_at/updated_at `INTEGER` -> `TEXT`: both dialects store the
+      Python-generated UTC ISO-8601 strings from _utcnow()
+    Everything else (IF NOT EXISTS, composite PKs, REFERENCES ... ON
+    DELETE CASCADE, ON CONFLICT upserts) is valid in both dialects.
+    """
+    ddl = SCHEMA.replace(
+        "INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+    ddl = re.sub(r"\b(created_at|updated_at)\s+INTEGER NOT NULL",
+                 r"\1 TEXT NOT NULL", ddl)
+    return ddl
+
+
+def _table_names(conn):
+    """Names of all tables, on either driver."""
+    if dialect_of(conn) == "postgres":
+        rows = execute(
+            conn,
+            "SELECT tablename AS name FROM pg_tables "
+            "WHERE schemaname='public'").fetchall()
+    else:
+        rows = execute(
+            conn,
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    return {r["name"] for r in rows}
+
+
+def _exec_script(conn, script):
+    """Run a multi-statement DDL script on either driver.
+
+    sqlite3 has executescript(); for psycopg2 the script is split on `;`
+    (the schema contains no semicolons inside string literals).
+    """
+    if dialect_of(conn) == "postgres":
+        for stmt in script.split(";"):
+            if stmt.strip():
+                execute(conn, stmt)
+    else:
+        conn.executescript(script)
+
+
 # ---------------------------------------------------------------------------
 # Token "encryption"
 # ---------------------------------------------------------------------------
@@ -242,28 +478,38 @@ def decrypt_token(ciphertext: str) -> str:
 class Store:
     def __init__(self, path="bot.db"):
         self.path = path
-        # check_same_thread=False: Flask's dev server is threaded.
-        self._conn = sqlite3.connect(path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA foreign_keys = ON")
-        tables_before = {
-            r["name"]
-            for r in self._conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
-        self._conn.executescript(SCHEMA)
+        # Postgres when DATABASE_URL is set (production on Render),
+        # otherwise SQLite (local dev + tests). `path` is ignored in
+        # Postgres mode.
+        self._conn = get_conn(path)
+        self._pg = dialect_of(self._conn) == "postgres"
+        tables_before = _table_names(self._conn)
+        _exec_script(self._conn,
+                     _postgres_ddl() if self._pg else SCHEMA)
         self._conn.commit()
         self._maybe_migrate(tables_before)
         self._ensure_template_columns()
         self._seed_templates()
         self._default_biz_id = None
 
+    def close(self):
+        """Close the underlying connection. Idempotent."""
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
     @contextmanager
     def _cur(self):
-        cur = self._conn.cursor()
+        cur = _Cursor(self._conn)
         try:
             yield cur
+        except Exception:
+            # Postgres aborts the whole transaction on any error — roll
+            # back so the connection stays usable. Harmless on SQLite.
+            self._conn.rollback()
+            raise
+        else:
             self._conn.commit()
         finally:
             cur.close()
@@ -277,7 +523,7 @@ class Store:
             print("[store] old single-business schema detected — rebuilding "
                   "(old DB held test data only)")
             for t in _OLD_TABLES:
-                self._conn.execute(f"DROP TABLE IF EXISTS {t}")
+                execute(self._conn, f"DROP TABLE IF EXISTS {t}")
             self._conn.commit()
         self._migrate_users_google_sub()
         self._migrate_bots_website_columns()
@@ -285,24 +531,36 @@ class Store:
             self._seed_bhoj_house()
             self._seed_aditya()
 
-    def _migrate_bots_website_columns(self):
-        """Add bots.website_url / bots.theme_color to DBs made before the
-        build-from-website feature (ALTER TABLE if the column is missing)."""
-        cols = {r["name"]
-                for r in self._conn.execute("PRAGMA table_info(bots)")}
-        for col in ("website_url", "theme_color"):
-            if col not in cols:
-                self._conn.execute(
-                    "ALTER TABLE bots ADD COLUMN %s TEXT" % col)
+    def _add_column_if_missing(self, table, column, col_ddl):
+        """Portable ADD COLUMN: IF NOT EXISTS on Postgres, PRAGMA check
+        + plain ADD COLUMN on SQLite."""
+        if self._pg:
+            execute(self._conn,
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS "
+                    f"{column} {col_ddl}")
+        else:
+            cols = {r["name"] for r in
+                    execute(self._conn,
+                            f"PRAGMA table_info({table})").fetchall()}
+            if column not in cols:
+                execute(self._conn,
+                        f"ALTER TABLE {table} ADD COLUMN {column} {col_ddl}")
         self._conn.commit()
 
+    def _migrate_bots_website_columns(self):
+        """Add bots.website_url / bots.theme_color to DBs made before the
+        build-from-website feature."""
+        for col in ("website_url", "theme_color"):
+            self._add_column_if_missing("bots", col, "TEXT")
+
     def _migrate_users_google_sub(self):
-        """Add users.google_sub to DBs created before Google sign-in."""
-        try:
-            self._conn.execute("ALTER TABLE users ADD COLUMN google_sub TEXT")
-            self._conn.commit()
-        except sqlite3.OperationalError:
-            pass  # column already exists
+        """Add users.google_sub to DBs created before Google sign-in.
+
+        Plain TEXT (not UNIQUE): SQLite cannot ADD a UNIQUE column via
+        ALTER TABLE, and pre-existing DBs never had the constraint.
+        Fresh DBs get UNIQUE from the schema itself.
+        """
+        self._add_column_if_missing("users", "google_sub", "TEXT")
 
     def _seed_aditya(self):
         """Seed Aditya Pratap's personal creator bot (business #2).
@@ -310,7 +568,7 @@ class Store:
         Showcases the creator/personal template on a fresh deploy: same
         content as his local bot (catalog, FAQs, labels, tone).
         """
-        now = int(time.time())
+        now = _utcnow()
         tpl = templates.get("creator")
         welcome_en = ("Hey! *Aditya Pratap* here ✨\n"
                       "Hindi hip-hop artist & Creative Technologist 🎤 | Label: Adiroxx\n"
@@ -374,7 +632,8 @@ class Store:
              "$99 थ्री-पैक।"),
         ]
         with self._cur() as cur:
-            cur.execute(
+            biz_id = insert_returning_id(
+                self._conn,
                 """INSERT INTO businesses
                    (user_id, name, template_id, booking_enabled,
                     label_catalog_en, label_catalog_hi,
@@ -398,15 +657,14 @@ class Store:
                     "active", 0, now,
                 ),
             )
-            biz_id = cur.lastrowid
             for s, cat in enumerate(categories):
-                cur.execute(
+                cat_id = insert_returning_id(
+                    self._conn,
                     """INSERT INTO menu_categories
                        (business_id, name_en, name_hi, emoji, sort)
                        VALUES (?,?,?,?,?)""",
                     (biz_id, cat["name_en"], cat["name_hi"], cat["emoji"], s),
                 )
-                cat_id = cur.lastrowid
                 for i, it in enumerate(cat["items"]):
                     cur.execute(
                         """INSERT INTO menu_items
@@ -427,10 +685,6 @@ class Store:
     def _ensure_template_columns(self):
         """Add template/tone columns to pre-template databases, backfilled
         as restaurant (the only kind that existed before templates)."""
-        cols = {
-            r["name"]
-            for r in self._conn.execute("PRAGMA table_info(businesses)").fetchall()
-        }
         ddl = {
             "template_id": "TEXT NOT NULL DEFAULT 'restaurant'",
             "booking_enabled": "INTEGER NOT NULL DEFAULT 1",
@@ -445,28 +699,26 @@ class Store:
             "brain_enabled": "INTEGER NOT NULL DEFAULT 0",
         }
         for col, col_ddl in ddl.items():
-            if col not in cols:
-                self._conn.execute(
-                    f"ALTER TABLE businesses ADD COLUMN {col} {col_ddl}")
-        self._conn.commit()
+            self._add_column_if_missing("businesses", col, col_ddl)
         tpl = templates.get("restaurant")
-        self._conn.execute(
-            "UPDATE businesses SET template_id='restaurant' "
-            "WHERE template_id IS NULL OR template_id=''")
-        backfill = {
-            "label_catalog_en": tpl["btn_catalog"]["en"],
-            "label_catalog_hi": tpl["btn_catalog"]["hi"],
-            "label_book_en": tpl["btn_action"]["en"],
-            "label_book_hi": tpl["btn_action"]["hi"],
-            "label_unit_en": tpl["unit"]["en"],
-            "label_unit_hi": tpl["unit"]["hi"],
-        }
-        for col, val in backfill.items():
-            self._conn.execute(
-                f"UPDATE businesses SET {col}=? WHERE {col} IS NULL OR {col}=''",
-                (val,),
-            )
-        self._conn.commit()
+        with self._cur() as cur:
+            cur.execute(
+                "UPDATE businesses SET template_id='restaurant' "
+                "WHERE template_id IS NULL OR template_id=''")
+            backfill = {
+                "label_catalog_en": tpl["btn_catalog"]["en"],
+                "label_catalog_hi": tpl["btn_catalog"]["hi"],
+                "label_book_en": tpl["btn_action"]["en"],
+                "label_book_hi": tpl["btn_action"]["hi"],
+                "label_unit_en": tpl["unit"]["en"],
+                "label_unit_hi": tpl["unit"]["hi"],
+            }
+            for col, val in backfill.items():
+                cur.execute(
+                    f"UPDATE businesses SET {col}=? "
+                    f"WHERE {col} IS NULL OR {col}=''",
+                    (val,),
+                )
 
     # -- templates -------------------------------------------------------
     def _seed_templates(self):
@@ -510,10 +762,11 @@ class Store:
         return [by_id[tid] for tid in templates.ids() if tid in by_id]
     def _seed_bhoj_house(self):
         """Seed the original demo restaurant from content.py as business #1."""
-        now = int(time.time())
+        now = _utcnow()
         tpl = templates.get("restaurant")
         with self._cur() as cur:
-            cur.execute(
+            biz_id = insert_returning_id(
+                self._conn,
                 """INSERT INTO businesses
                    (user_id, name, template_id, booking_enabled,
                     label_catalog_en, label_catalog_hi,
@@ -541,15 +794,14 @@ class Store:
                     "active", 1, now,
                 ),
             )
-            biz_id = cur.lastrowid
             for s, cat in enumerate(MENU):
-                cur.execute(
+                cat_id = insert_returning_id(
+                    self._conn,
                     """INSERT INTO menu_categories
                        (business_id, name_en, name_hi, emoji, sort)
                        VALUES (?,?,?,?,?)""",
                     (biz_id, cat["name_en"], cat["name_hi"], cat["emoji"], s),
                 )
-                cat_id = cur.lastrowid
                 for i, it in enumerate(cat["items"]):
                     cur.execute(
                         """INSERT INTO menu_items
@@ -594,17 +846,18 @@ class Store:
 
     # -- users -----------------------------------------------------------
     def create_user(self, email, password_hash, google_sub=None):
-        with self._cur() as cur:
+        with self._cur():
             try:
-                cur.execute(
-                    "INSERT INTO users (email, password_hash, google_sub, created_at)"
-                    " VALUES (?,?,?,?)",
+                return insert_returning_id(
+                    self._conn,
+                    "INSERT INTO users (email, password_hash, google_sub,"
+                    " created_at) VALUES (?,?,?,?)",
                     (email.strip().lower(), password_hash, google_sub,
-                     int(time.time())),
+                     _utcnow()),
                 )
-            except sqlite3.IntegrityError:
+            except _INTEGRITY_ERRORS:
+                self._conn.rollback()  # reset aborted PG transaction
                 return None  # email (or google_sub) already taken
-            return cur.lastrowid
 
     def get_user_by_email(self, email):
         with self._cur() as cur:
@@ -627,7 +880,8 @@ class Store:
                 cur.execute(
                     "UPDATE users SET google_sub=? WHERE id=?", (sub, user_id)
                 )
-            except sqlite3.IntegrityError:
+            except _INTEGRITY_ERRORS:
+                self._conn.rollback()  # reset aborted PG transaction
                 return False  # this Google account is linked elsewhere
             return cur.rowcount > 0
 
@@ -645,7 +899,7 @@ class Store:
     def save_user_brain_key(self, user_id, key_plain):
         """Store/replace the owner's encrypted Gemini key."""
         enc = encrypt_token((key_plain or "").strip())
-        now = int(time.time())
+        now = _utcnow()
         with self._cur() as cur:
             cur.execute(
                 "INSERT INTO user_brain_keys (user_id, key_enc, updated_at)"
@@ -695,18 +949,19 @@ class Store:
         token = self._new_share_token()
         website_url = (website_url or "").strip() or None
         theme_color = sitefetch.normalize_theme_hex(theme_color)
-        with self._cur() as cur:
+        with self._cur():
             for _ in range(5):  # astronomically unlikely to loop
                 try:
-                    cur.execute(
+                    return insert_returning_id(
+                        self._conn,
                         "INSERT INTO bots (user_id, name, prompt,"
                         " website_url, theme_color, share_token,"
                         " created_at) VALUES (?,?,?,?,?,?,?)",
                         (user_id, name, (prompt or "").strip(),
-                         website_url, theme_color, token, int(time.time())),
+                         website_url, theme_color, token, _utcnow()),
                     )
-                    return cur.lastrowid
-                except sqlite3.IntegrityError:
+                except _INTEGRITY_ERRORS:
+                    self._conn.rollback()  # reset aborted PG transaction
                     token = self._new_share_token()
             raise RuntimeError("could not mint a unique bot share token")
 
@@ -803,7 +1058,7 @@ class Store:
         existing = self.get_whatsapp_connection(user_id)
         verify = (existing["verify_token"] if existing
                   else self._new_verify_token())
-        now = int(time.time())
+        now = _utcnow()
         with self._cur() as cur:
             cur.execute(
                 "INSERT INTO whatsapp_connections "
@@ -931,7 +1186,7 @@ class Store:
             "name": name,
             "user_id": user_id,
             "template_id": tid,
-            "created_at": int(time.time()),
+            "created_at": _utcnow(),
             # overridable template defaults:
             "booking_enabled": 1 if tpl["booking_enabled"] else 0,
             "label_catalog_en": tpl["btn_catalog"]["en"],
@@ -959,12 +1214,13 @@ class Store:
                     v = 1 if v else 0
                 fields[k] = v
         cols = ", ".join(fields)
-        with self._cur() as cur:
-            cur.execute(
-                f"INSERT INTO businesses ({cols}) VALUES ({','.join('?'*len(fields))})",
+        with self._cur():
+            bid = insert_returning_id(
+                self._conn,
+                f"INSERT INTO businesses ({cols})"
+                f" VALUES ({','.join('?'*len(fields))})",
                 tuple(fields.values()),
             )
-            bid = cur.lastrowid
         # starter FAQs for the template (owner can edit/delete them later)
         for faq in tpl["faq_seeds"]:
             self.add_faq(bid, faq["id"], faq["keywords"],
@@ -1049,13 +1305,14 @@ class Store:
                 "SELECT COALESCE(MAX(sort),-1)+1 AS s FROM menu_categories"
                 " WHERE business_id=?", (business_id,)
             ).fetchone()
-            cur.execute(
+            return insert_returning_id(
+                self._conn,
                 """INSERT INTO menu_categories
                    (business_id, name_en, name_hi, emoji, sort)
                    VALUES (?,?,?,?,?)""",
-                (business_id, name_en.strip(), name_hi.strip(), emoji, row["s"]),
+                (business_id, name_en.strip(), name_hi.strip(), emoji,
+                 row["s"]),
             )
-            return cur.lastrowid
 
     def update_category(self, cat_id, **fields):
         allowed = {"name_en", "name_hi", "emoji", "sort"}
@@ -1089,14 +1346,14 @@ class Store:
                 "SELECT COALESCE(MAX(sort),-1)+1 AS s FROM menu_items"
                 " WHERE category_id=?", (category_id,)
             ).fetchone()
-            cur.execute(
+            return insert_returning_id(
+                self._conn,
                 """INSERT INTO menu_items
                    (category_id, name_en, name_hi, price, veg, description, sort)
                    VALUES (?,?,?,?,?,?,?)""",
                 (category_id, name_en.strip(), name_hi.strip(), int(price),
                  1 if veg else 0, description.strip(), row["s"]),
             )
-            return cur.lastrowid
 
     def update_item(self, item_id, **fields):
         allowed = {"name_en", "name_hi", "price", "veg", "description", "sort"}
@@ -1148,14 +1405,15 @@ class Store:
     def add_faq(self, business_id, faq_key, keywords, answer_en, answer_hi):
         if isinstance(keywords, (list, tuple)):
             keywords = ", ".join(keywords)
-        with self._cur() as cur:
-            cur.execute(
+        with self._cur():
+            return insert_returning_id(
+                self._conn,
                 """INSERT INTO faqs
                    (business_id, faq_key, keywords, answer_en, answer_hi)
                    VALUES (?,?,?,?,?)""",
-                (business_id, faq_key.strip(), keywords, answer_en, answer_hi),
+                (business_id, faq_key.strip(), keywords, answer_en,
+                 answer_hi),
             )
-            return cur.lastrowid
 
     def update_faq(self, faq_id, **fields):
         allowed = {"faq_key", "keywords", "answer_en", "answer_hi"}
@@ -1336,7 +1594,7 @@ class Store:
                     session.get("lang", "en"),
                     session.get("state", "idle"),
                     data,
-                    int(time.time()),
+                    _utcnow(),
                 ),
             )
 
@@ -1353,7 +1611,7 @@ class Store:
                     booking["id"], business_id,
                     booking["phone"], booking["name"],
                     booking["date"], booking["time"],
-                    booking["party_size"], int(time.time()),
+                    booking["party_size"], _utcnow(),
                 ),
             )
 
@@ -1382,7 +1640,7 @@ class Store:
             cur.execute(
                 "INSERT INTO owner_alerts (business_id, phone, reason, handled, created_at)"
                 " VALUES (?, ?, ?, 0, ?)",
-                (business_id, phone, reason[:500], int(time.time())),
+                (business_id, phone, reason[:500], _utcnow()),
             )
 
     def list_alerts(self, business_id=None, limit=100):
@@ -1401,7 +1659,7 @@ class Store:
             cur.execute(
                 "INSERT INTO message_log (business_id, phone, direction, created_at)"
                 " VALUES (?,?,?,?)",
-                (business_id, phone, direction, int(time.time())),
+                (business_id, phone, direction, _utcnow()),
             )
 
     def count_messages(self, business_id, direction=None):

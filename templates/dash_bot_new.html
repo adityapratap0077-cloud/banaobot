@@ -33,6 +33,7 @@
         </div>
       </div>
       <p class="hint" id="site-status" role="status" hidden></p>
+      <p class="hint" id="site-thin" hidden></p>
       <p class="hint" id="site-theme" hidden>
         <span class="theme-swatch" id="site-swatch" aria-hidden="true"></span>
         <span id="site-theme-text"></span>
@@ -157,6 +158,7 @@ RULES:
   var fetchBtn = document.getElementById('site-fetch');
   var urlInput = document.getElementById('site-url');
   var status = document.getElementById('site-status');
+  var thinNote = document.getElementById('site-thin');
   var themeNote = document.getElementById('site-theme');
   var themeSwatch = document.getElementById('site-swatch');
   var themeText = document.getElementById('site-theme-text');
@@ -174,6 +176,8 @@ RULES:
     fetchBtn.addEventListener('click', function () {
       var url = urlInput.value.trim();
       themeNote.hidden = true;
+      thinNote.hidden = true;
+      thinNote.textContent = '';
       if (!url) {
         setStatus('Paste your website address first.', 'err');
         urlInput.focus();
@@ -206,6 +210,10 @@ RULES:
             themeSwatch.style.background = d.theme_color;
             themeText.textContent = 'Detected your brand colour — the chat page will wear it.';
             themeNote.hidden = false;
+          }
+          if (d.thin && d.note) {
+            thinNote.textContent = d.note;
+            thinNote.hidden = false;
           }
           setStatus('Done — your bot draft is below. Edit anything you like, then hit "Create my bot".', 'ok');
           ta.focus();

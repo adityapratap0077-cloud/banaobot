@@ -352,4 +352,86 @@ check(brain.chat_with_prompt("k", BOT_NAME, OWNER_PROMPT, [], "   ")
       is not None,
       "chat_with_prompt never returns None (blank text -> honest nudge)")
 
+# ---------------------------------------------------------------------------
+# (k) chat_with_prompt_explained(): error codes + owner notes
+# ---------------------------------------------------------------------------
+print("== (k) chat_with_prompt_explained ==")
+
+
+def google_400(req, timeout=None):
+    raise urllib.error.HTTPError(
+        req.full_url, 400, "Bad Request", {},
+        io.BytesIO(b'{"error":{"code":400,"message":"API key not valid. '
+                   b'Please pass a valid API key.","status":"INVALID_ARGUMENT"}}'))
+
+
+with mock.patch.object(brain.urllib.request, "urlopen", google_400):
+    text, code = brain.chat_with_prompt_explained(
+        "bad-key", BOT_NAME, OWNER_PROMPT, [], "hi")
+check(code == "bad_key", "HTTP 400 with Google error body -> bad_key")
+check("snag reaching my brain" in text,
+      "bad key: visitor text stays the honest generic message")
+check("bad-key" not in text and "INVALID_ARGUMENT" not in text,
+      "no key material or raw Google JSON in the visitor text")
+
+
+def google_429(req, timeout=None):
+    raise urllib.error.HTTPError(
+        req.full_url, 429, "Too Many Requests", {},
+        io.BytesIO(b'{"error":{"code":429,"message":"Quota exceeded.",'
+                   b'"status":"RESOURCE_EXHAUSTED"}}'))
+
+
+with mock.patch.object(brain.urllib.request, "urlopen", google_429):
+    text, code = brain.chat_with_prompt_explained(
+        "k", BOT_NAME, OWNER_PROMPT, [], "hi")
+check(code == "quota", "HTTP 429 -> quota")
+
+
+def net_down(req, timeout=None):
+    raise urllib.error.URLError("connection refused")
+
+
+with mock.patch.object(brain.urllib.request, "urlopen", net_down):
+    text, code = brain.chat_with_prompt_explained(
+        "k", BOT_NAME, OWNER_PROMPT, [], "hi")
+check(code == "network", "URLError -> network")
+check("couldn't reach my brain" in text.lower(),
+      "network failure keeps its honest visitor message")
+
+
+def all_404(req, timeout=None):
+    raise urllib.error.HTTPError(
+        req.full_url, 404, "Not Found", {},
+        io.BytesIO(b'{"error":{"message":"model not found"}}'))
+
+
+with mock.patch.object(brain.urllib.request, "urlopen", all_404):
+    text, code = brain.chat_with_prompt_explained(
+        "k", BOT_NAME, OWNER_PROMPT, [], "hi")
+check(code == "models_retired", "all model names 404 -> models_retired")
+check("brain models" in text, "models_retired keeps its visitor message")
+
+with mock.patch.object(brain.urllib.request, "urlopen",
+                       fake_prompt_urlopen):
+    text, code = brain.chat_with_prompt_explained(
+        "secret-key", BOT_NAME, OWNER_PROMPT, [], "namaste")
+check(code is None and "Chaiwala Bot" in text,
+      "success -> (model text, None)")
+
+text, code = brain.chat_with_prompt_explained(
+    "", BOT_NAME, OWNER_PROMPT, [], "hi")
+check(code == "no_key" and "not awake" in text.lower(),
+      "missing key -> no_key with the 'not awake' message")
+
+note = brain.owner_note_for("bad_key")
+check("Owner note" in note and "Brain key" in note
+      and "bad_key" not in note,
+      "owner_note_for(bad_key) is a plain diagnosis, no codes leak")
+check(brain.owner_note_for(None) == ""
+      and brain.owner_note_for("no_key") == "",
+      "success and no_key get no owner note")
+check("API key" not in brain.owner_note_for("quota"),
+      "owner notes never contain key material")
+
 print(f"\n{PASS} brain checks passed.")

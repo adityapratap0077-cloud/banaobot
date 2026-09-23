@@ -409,4 +409,130 @@ check(mbot["website_url"] == "https://old.example"
       "migrated DB stores website fields on new bots")
 os.unlink(old_path)
 
+# ------------------------------------------------- 7. JS-rendered SPA extraction
+print("== (7) JS-rendered SPA extraction ==")
+
+SPA_HTML = (
+    '<!doctype html><html><head>'
+    '<title>Aditya Pratap \u2014 Portfolio</title>'
+    '<meta name="description" content="Portfolio of a creative technologist.">'
+    '</head><body><div id="root"></div>'
+    '<noscript><p>Aditya Pratap is a creative technologist building '
+    'AI products and music.</p></noscript>'
+    '<script type="application/ld+json">{"@type":"Person",'
+    '"name":"Aditya Pratap","description":"Creative technologist crafting '
+    'AI powered web experiences for small businesses"}</script>'
+    '<script>const t="AI & Web Development Strategist \u2014 Independent '
+    'Projects | 2024 \u2013 Present";'
+    'const d="I design and ship AI-powered web products for small '
+    'businesses, from first sketch to live deployment.";'
+    'const h="Over the last three years I have shipped more than twenty '
+    'client projects across cafes, gyms and boutiques.";'
+    'const k="Every engagement starts with a free consultation call where '
+    'we map your goals to a launch plan.";'
+    'const e=()=>{};'
+    'function render(){return React.createElement("div",null)};'
+    'document.addEventListener("mousedown",()=>{});'
+    'const g="If you meant to render on the server side";</script>'
+    '</body></html>')
+
+spa = sitefetch.extract_brief(SPA_HTML, "https://portfolio.example/")
+harvested = sitefetch._harvest_texts(sitefetch._parse(SPA_HTML))
+blob = spa["description"] + str(spa["offerings"]) + str(harvested)
+check("Aditya Pratap is a creative technologist" in spa["description"],
+      "noscript fallback text is recovered")
+check("Creative technologist crafting" in spa["description"],
+      "JSON-LD description is recovered")
+check(any("design and ship AI-powered" in h for h in harvested),
+      "content-like JS string literal is harvested")
+check("React.createElement" not in blob and "mousedown" not in blob,
+      "React boilerplate strings are excluded")
+check("If you meant" not in blob,
+      "framework boilerplate ('If you meant...') is excluded")
+check("=>" not in blob,
+      "code fragments (=>) never leak into the brief")
+check(any("Strategist" in o for o in spa["offerings"]),
+      "title-like harvested line feeds offerings")
+check(spa["thin"] is False, "content-rich SPA page is not thin")
+
+LD_OFFERINGS = (
+    '<html><head><title>Cafe</title>'
+    '<script type="application/ld+json">{"@type":"CafeOrCoffeeShop",'
+    '"name":"Bean There","servesCuisine":["Espresso based drinks",'
+    '"Freshly baked croissants and sourdough loaves"]}</script>'
+    '</head><body><div id="app"></div></body></html>')
+ld = sitefetch.extract_brief(LD_OFFERINGS, "https://cafe.example/")
+check(any("croissants" in o for o in ld["offerings"]),
+      "JSON-LD array strings feed offerings")
+
+thin_page = sitefetch.extract_brief(
+    "<html><head><title>Empty</title></head><body></body></html>",
+    "https://empty.example/")
+check(thin_page["thin"] is True, "empty page -> thin=True")
+check(brief["thin"] is False, "rich cafe fixture -> thin=False")
+
+thin_prompt2 = sitefetch.build_prompt_from_brief(thin_page,
+                                                "https://empty.example/")
+check("javascript" in thin_prompt2.lower(),
+      "thin prompt explains the site loads content with JavaScript")
+check("honest" in thin_prompt2.lower(),
+      "thin prompt keeps the honesty note")
+
+# ------------------------------------------------- 8. fetch-site: scheme + thin note
+print("== (8) fetch-site: scheme auto-prepend + thin note ==")
+client, store = fresh_client()
+dashboard._site_fetch_hits.clear()
+
+r = client.post("/app/signup",
+                data={"email": "thin@test.local",
+                      "password": "secret123", "confirm": "secret123"})
+check(r.status_code == 302, "signup works for the thin-note test user")
+
+seen_urls = []
+real_fetch2 = sitefetch.fetch_site
+
+
+def clean_only_fetch(url):
+    # exercise the real URL normalization, no network
+    seen_urls.append(url)
+    return CAFE_HTML, sitefetch._clean_url(url)
+
+
+sitefetch.fetch_site = clean_only_fetch
+try:
+    r = client.post("/app/fetch-site", json={"url": "example.com/page"})
+    data = r.get_json()
+    check(r.status_code == 200 and data["ok"] is True,
+          "scheme-less URL works ('example.com/page')")
+    check(data["url"] == "https://example.com/page",
+          "scheme auto-prepended to https://")
+    check(seen_urls == ["example.com/page"],
+          "endpoint strips whitespace and passes the raw URL through")
+finally:
+    sitefetch.fetch_site = real_fetch2
+
+THIN_HTML = ("<html><head><title>Thin SPA</title></head><body>"
+             "<div id='root'></div>"
+             "<script>var config={apiUrl:'/api'};</script>"
+             "</body></html>")
+sitefetch.fetch_site = lambda url: (THIN_HTML, "https://thin.example/")
+try:
+    r = client.post("/app/fetch-site", json={"url": "https://thin.example"})
+    data = r.get_json()
+    check(data["ok"] is True and data["thin"] is True,
+          "thin site -> thin:true in response")
+    check(data.get("note") and "JavaScript" in data["note"],
+          "thin site -> honest JS-heavy note in response")
+    check("JavaScript" in data["prompt"],
+          "thin site -> generated prompt carries the JS honesty note")
+finally:
+    sitefetch.fetch_site = real_fetch2
+    dashboard._site_fetch_hits.clear()
+
+# new-bot page renders the thin-note placeholder under the fetch block
+r = client.get("/app/bots/new")
+html = r.get_data(as_text=True)
+check('id="site-thin"' in html,
+      "new-bot page has the thin-note placeholder")
+
 print(f"\nALL {PASS} SITEFETCH CHECKS PASSED ✔")
