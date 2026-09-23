@@ -30,8 +30,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-_GEMINI_URL = ("https://generativelanguage.googleapis.com/v1beta/"
-               "models/gemini-2.0-flash:generateContent")
+_GEMINI_API = "https://generativelanguage.googleapis.com/v1beta"
+# Google retires model names over time (gemini-2.0-flash started returning
+# 404 NOT_FOUND in Sep 2026), so try candidates in order and use the first
+# model that answers. 404 -> try the next name; other errors stop the loop.
+_GEMINI_MODELS = ("gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash")
 _TIMEOUT = 25
 _MAX_HISTORY = 8  # exchanges (user+bot pairs) sent as context
 
@@ -167,33 +170,42 @@ def chat_with_error(api_key, bundle, history, user_text, lang="en"):
             "temperature": 0.7,
         },
     }
-    req = urllib.request.Request(
-        _GEMINI_URL + "?key=" + urllib.parse.quote(api_key.strip()),
-        data=json.dumps(payload).encode(),
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            raw = resp.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as e:
+    body = json.dumps(payload).encode()
+    last_err = "unknown error"
+    for model in _GEMINI_MODELS:
+        req = urllib.request.Request(
+            "%s/models/%s:generateContent?key=%s"
+            % (_GEMINI_API, model, urllib.parse.quote(api_key.strip())),
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
         try:
-            body = e.read().decode("utf-8", "replace")
-        except Exception:
-            body = ""
-        return None, "HTTP %s%s" % (e.code, ": " + _google_error_msg(body)
-                                    if body else "")
-    except Exception as e:  # network/timeout/DNS -> rule-based fallback
-        return None, "request failed: %s" % type(e).__name__
-    try:
-        data = json.loads(raw)
-        parts = data["candidates"][0]["content"]["parts"]
-        text = "".join(p.get("text", "") for p in parts).strip()
-    except (KeyError, IndexError, TypeError, ValueError):
-        return None, "unparseable response from the API"
-    if not text:
-        return None, "API returned no text (block reason: %s)" % _block_reason(data)
-    return text, None
+            with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+                raw = resp.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            try:
+                err_body = e.read().decode("utf-8", "replace")
+            except Exception:
+                err_body = ""
+            last_err = "HTTP %s%s" % (
+                e.code, ": " + _google_error_msg(err_body) if err_body else "")
+            if e.code == 404:
+                continue  # retired/unknown model name -> try next candidate
+            return None, last_err
+        except Exception as e:  # network/timeout/DNS -> rule-based fallback
+            return None, "request failed: %s" % type(e).__name__
+        try:
+            data = json.loads(raw)
+            parts = data["candidates"][0]["content"]["parts"]
+            text = "".join(p.get("text", "") for p in parts).strip()
+        except (KeyError, IndexError, TypeError, ValueError):
+            return None, "unparseable response from the API"
+        if not text:
+            return None, ("API returned no text (block reason: %s)"
+                          % _block_reason(data))
+        return text, None
+    return None, last_err
 
 
 def chat(api_key, bundle, history, user_text, lang="en"):
