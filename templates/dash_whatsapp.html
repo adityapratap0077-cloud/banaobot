@@ -1,0 +1,185 @@
+{% extends "app_base.html" %}
+
+{% block title %}WhatsApp — BanaoBot{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <div class="page-head">
+    <div>
+      <p class="kicker">Integrations</p>
+      <h1>WhatsApp</h1>
+      <p class="sub">Let customers talk to your bot on WhatsApp through Meta's Cloud API.</p>
+    </div>
+  </div>
+
+  <!-- Status -->
+  <section class="panel" aria-label="Connection status" style="max-width: 760px;">
+    <div class="panel-head">
+      <h2><span class="num">&#9679;</span> Status</h2>
+    </div>
+    <div class="panel-body">
+      {% if conn %}
+      <div class="key-status">
+        <span class="pill">{{ "Connected" if conn.enabled else "Paused" }}</span>
+        <p>
+          Number ID <code class="mono">{{ conn.phone_number_id }}</code>
+          {% if linked_bot %}&middot; answering as <strong>{{ linked_bot.name }}</strong>{% else %}&middot; <strong>no bot linked yet</strong> — pick one below{% endif %}
+          {% if not has_key %}<br><strong>Heads up:</strong> no brain key is saved, so replies will be the honest &ldquo;not awake&rdquo; message until you add one.{% endif %}
+          {% if demo_mode %}<br><strong>Demo mode is ON:</strong> replies are logged, not sent. Set <code class="mono">DEMO_MODE=false</code> on your host to go live.{% endif %}
+        </p>
+      </div>
+      <div class="share-box">
+        <span class="share-label">Webhook URL &mdash; paste into Meta's dashboard</span>
+        <input type="text" id="wa-webhook" class="share-url" value="{{ webhook_url }}" readonly onclick="this.select()" aria-label="Webhook URL">
+        <button type="button" class="btn btn-small" data-copy="#wa-webhook">Copy</button>
+      </div>
+      <div class="share-box">
+        <span class="share-label">Verify token &mdash; paste into Meta's dashboard</span>
+        <input type="text" id="wa-verify" class="share-url" value="{{ conn.verify_token }}" readonly onclick="this.select()" aria-label="Verify token">
+        <button type="button" class="btn btn-small" data-copy="#wa-verify">Copy</button>
+      </div>
+      {% else %}
+      <div class="notice" style="margin-bottom: 0;">
+        <div class="notice-mark">!</div>
+        <div class="notice-body">
+          <strong>Not connected yet</strong>
+          <p>Save your Meta credentials below and this page will hand you a webhook URL and verify token.</p>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- Credentials -->
+  <section class="panel" aria-label="Meta credentials" style="max-width: 760px;">
+    <div class="panel-head">
+      <h2><span class="num">01</span> Meta credentials</h2>
+    </div>
+    <div class="panel-body">
+      <p class="panel-note">From your Meta app's WhatsApp dashboard. Tokens are <strong>stored encrypted</strong> and never shown again after saving.</p>
+      <form method="post" action="/app/whatsapp">
+        <input type="hidden" name="action" value="save">
+        <div class="field">
+          <label for="phone_number_id">Phone number ID</label>
+          <input type="text" id="phone_number_id" name="phone_number_id" autocomplete="off"
+                 value="{{ conn.phone_number_id if conn else '' }}"
+                 placeholder="e.g. 123456789012345" required>
+          <p class="hint">WhatsApp &rarr; API Setup &rarr; phone number ID.</p>
+        </div>
+        <div class="field">
+          <label for="access_token">Access token</label>
+          <input type="password" id="access_token" name="access_token" autocomplete="off"
+                 placeholder="Paste a fresh token">
+          <p class="hint">Generate a temporary token under API Setup, or a permanent one for your Meta app.</p>
+        </div>
+        <div class="field">
+          <label for="app_secret">App secret <span class="smallprint">(optional)</span></label>
+          <input type="password" id="app_secret" name="app_secret" autocomplete="off"
+                 placeholder="Only if you want webhook signatures verified">
+          <p class="hint">App settings &rarr; Basic &rarr; App secret. When set, Meta's message signatures are verified and fakes are rejected.</p>
+        </div>
+        <div class="form-actions" style="margin-top: 20px;">
+          <button type="submit" class="btn btn-accent">{{ "Update connection" if conn else "Connect WhatsApp" }}</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  {% if conn %}
+  <!-- Bot picker + pause -->
+  <section class="panel" aria-label="Which bot answers" style="max-width: 760px;">
+    <div class="panel-head">
+      <h2><span class="num">02</span> Which bot answers</h2>
+    </div>
+    <div class="panel-body">
+      {% if bots %}
+      <form method="post" action="/app/whatsapp" style="margin-bottom: 16px;">
+        <input type="hidden" name="action" value="setbot">
+        <div class="field">
+          <label for="bot_id">Linked bot</label>
+          <select id="bot_id" name="bot_id">
+            <option value="">— none —</option>
+            {% for b in bots %}
+            <option value="{{ b.id }}" {% if conn.bot_id == b.id %}selected{% endif %}>{{ b.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-actions" style="margin-top: 16px;">
+          <button type="submit" class="btn btn-paper">Link bot</button>
+        </div>
+      </form>
+      {% else %}
+      <p class="panel-note"><a href="/app/bots/new">Create a bot first</a> — then come back and link it here.</p>
+      {% endif %}
+      <form method="post" action="/app/whatsapp">
+        <input type="hidden" name="action" value="toggle">
+        <button type="submit" class="btn btn-small">{{ "Pause replies" if conn.enabled else "Resume replies" }}</button>
+      </form>
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- Setup guide -->
+  <section class="panel" aria-label="Setup guide" style="max-width: 760px;">
+    <div class="panel-head">
+      <h2><span class="num">03</span> Setup guide</h2>
+    </div>
+    <div class="panel-body">
+      <ol class="guide">
+        <li><strong>Create a Meta app</strong> at <span class="mono">developers.facebook.com</span> and add the <strong>WhatsApp</strong> product.</li>
+        <li><strong>Get a test number:</strong> under WhatsApp &rarr; API Setup, Meta gives you a free test number — note its <strong>phone number ID</strong>.</li>
+        <li><strong>Generate an access token</strong> on the same page (temporary is fine for testing).</li>
+        <li><strong>Paste both above</strong> and hit Connect.</li>
+        <li><strong>Subscribe the webhook:</strong> in Meta go to WhatsApp &rarr; Configuration &rarr; Webhook, paste the <strong>webhook URL</strong> and <strong>verify token</strong> from the Status panel, and subscribe to the <strong>messages</strong> field.</li>
+        <li><strong>Talk to it:</strong> message your test number from WhatsApp — your linked bot answers.</li>
+      </ol>
+      <p class="panel-note">Honest limits: production numbers need Meta's app review and approval; the test sandbox works immediately. The free host sleeps when idle, so the first reply after a nap can take ~30 seconds. Meta retries failed webhooks — the endpoint always answers 200 so retries never pile up.</p>
+    </div>
+  </section>
+
+  {% if conn %}
+  <!-- Danger zone -->
+  <section class="panel danger" aria-label="Danger zone" style="max-width: 760px;">
+    <div class="panel-head">
+      <h2><span class="num">!!</span> Danger zone</h2>
+    </div>
+    <div class="panel-body">
+      <p>Disconnecting removes your credentials and the webhook stops answering for your number. Your bots are untouched.</p>
+      <form method="post" action="/app/whatsapp"
+            onsubmit="return confirm('Disconnect WhatsApp? The webhook will stop replying.');">
+        <input type="hidden" name="action" value="disconnect">
+        <button type="submit" class="btn btn-danger">Disconnect WhatsApp</button>
+      </form>
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  document.querySelectorAll('[data-copy]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var input = document.querySelector(btn.getAttribute('data-copy'));
+      if (!input) return;
+      input.select();
+      var label = btn.textContent;
+      var done = function () {
+        btn.textContent = 'Copied ✓';
+        setTimeout(function () { btn.textContent = label; }, 1800);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(input.value).then(done, function () {
+          document.execCommand('copy');
+          done();
+        });
+      } else {
+        document.execCommand('copy');
+        done();
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

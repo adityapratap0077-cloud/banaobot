@@ -63,6 +63,17 @@ CREATE TABLE IF NOT EXISTS bots (
     created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_bots_user ON bots(user_id, created_at);
+CREATE TABLE IF NOT EXISTS whatsapp_connections (
+    user_id          INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    phone_number_id  TEXT NOT NULL,
+    access_token_enc TEXT NOT NULL,
+    app_secret_enc   TEXT,
+    verify_token     TEXT UNIQUE NOT NULL,
+    bot_id           INTEGER REFERENCES bots(id) ON DELETE SET NULL,
+    enabled          INTEGER NOT NULL DEFAULT 1,
+    created_at       INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_wa_pnid ON whatsapp_connections(phone_number_id);
 CREATE TABLE IF NOT EXISTS businesses (
     id                     INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id                INTEGER NOT NULL DEFAULT 0,
@@ -732,6 +743,137 @@ class Store:
             cur.execute(
                 "DELETE FROM bots WHERE id=? AND user_id=?",
                 (bot_id, user_id),
+            )
+            return cur.rowcount > 0
+
+    # -- WhatsApp Cloud API connections ------------------------------------
+    # One connection per owner: their Meta phone_number_id + encrypted
+    # access token, a generated verify_token for Meta's webhook handshake,
+    # the prompt-first bot that answers incoming messages, and an
+    # enabled flag. Raw tokens are never exposed by the getters used for
+    # display — they return masked status only.
+
+    @staticmethod
+    def _new_verify_token():
+        import secrets as _secrets
+        return _secrets.token_urlsafe(24)
+
+    def save_whatsapp_connection(self, user_id, phone_number_id,
+                                 access_token_plain, app_secret_plain=""):
+        """Create or replace the owner's WhatsApp connection.
+
+        The verify_token survives updates (Meta's subscription keeps
+        working); it is only generated for a brand-new connection.
+        """
+        pnid = (phone_number_id or "").strip()
+        token = (access_token_plain or "").strip()
+        if not pnid or len(token) < 10:
+            raise ValueError("phone_number_id and a real access token "
+                             "are required")
+        secret = (app_secret_plain or "").strip()
+        existing = self.get_whatsapp_connection(user_id)
+        verify = (existing["verify_token"] if existing
+                  else self._new_verify_token())
+        now = int(time.time())
+        with self._cur() as cur:
+            cur.execute(
+                "INSERT INTO whatsapp_connections "
+                "(user_id, phone_number_id, access_token_enc, app_secret_enc,"
+                " verify_token, bot_id, enabled, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(user_id) DO UPDATE SET"
+                " phone_number_id=excluded.phone_number_id,"
+                " access_token_enc=excluded.access_token_enc,"
+                " app_secret_enc=excluded.app_secret_enc",
+                (user_id, pnid, encrypt_token(token),
+                 encrypt_token(secret) if secret else None,
+                 verify,
+                 existing["bot_id"] if existing else None,
+                 existing["enabled"] if existing else 1,
+                 now),
+            )
+        return True
+
+    def _wa_row_to_dict(self, row, include_secrets=False):
+        conn = dict(row)
+        conn["enabled"] = bool(conn["enabled"])
+        if include_secrets:
+            try:
+                conn["access_token"] = decrypt_token(conn["access_token_enc"] or "")
+            except Exception:
+                conn["access_token"] = ""
+            try:
+                conn["app_secret"] = decrypt_token(conn["app_secret_enc"] or "")
+            except Exception:
+                conn["app_secret"] = ""
+        else:
+            conn.pop("access_token_enc", None)
+            conn.pop("app_secret_enc", None)
+        return conn
+
+    def get_whatsapp_connection(self, user_id):
+        """Owner's connection without raw secrets (safe for templates)."""
+        with self._cur() as cur:
+            row = cur.execute(
+                "SELECT * FROM whatsapp_connections WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
+        return self._wa_row_to_dict(row) if row else None
+
+    def _get_whatsapp_connection_secrets(self, user_id):
+        """Internal: connection WITH decrypted secrets for sending."""
+        with self._cur() as cur:
+            row = cur.execute(
+                "SELECT * FROM whatsapp_connections WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
+        return self._wa_row_to_dict(row, include_secrets=True) if row else None
+
+    def get_whatsapp_connection_by_pnid(self, phone_number_id):
+        """Webhook lookup: which owner owns this Meta phone_number_id."""
+        with self._cur() as cur:
+            row = cur.execute(
+                "SELECT * FROM whatsapp_connections WHERE phone_number_id=?",
+                (phone_number_id or "",),
+            ).fetchone()
+        return self._wa_row_to_dict(row, include_secrets=True) if row else None
+
+    def get_whatsapp_connection_by_verify_token(self, verify_token):
+        """Meta handshake lookup. Secrets not needed here."""
+        with self._cur() as cur:
+            row = cur.execute(
+                "SELECT * FROM whatsapp_connections WHERE verify_token=?",
+                (verify_token or "",),
+            ).fetchone()
+        return self._wa_row_to_dict(row) if row else None
+
+    def set_whatsapp_bot(self, user_id, bot_id):
+        """Link a bot to the connection. bot_id must belong to the owner
+        (or None to unlink). Returns True on success."""
+        if bot_id is not None:
+            bot = self.get_bot(bot_id, user_id)
+            if bot is None:
+                return False
+        with self._cur() as cur:
+            cur.execute(
+                "UPDATE whatsapp_connections SET bot_id=? WHERE user_id=?",
+                (bot_id, user_id),
+            )
+            return cur.rowcount > 0
+
+    def set_whatsapp_enabled(self, user_id, enabled):
+        with self._cur() as cur:
+            cur.execute(
+                "UPDATE whatsapp_connections SET enabled=? WHERE user_id=?",
+                (1 if enabled else 0, user_id),
+            )
+            return cur.rowcount > 0
+
+    def delete_whatsapp_connection(self, user_id):
+        with self._cur() as cur:
+            cur.execute(
+                "DELETE FROM whatsapp_connections WHERE user_id=?",
+                (user_id,),
             )
             return cur.rowcount > 0
 

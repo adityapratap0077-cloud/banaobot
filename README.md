@@ -25,6 +25,10 @@ Gemini (owner's key) → in-character reply
 3. **Preview & test** the live AI chat right on the bot page.
 4. **Share the link** — every bot has a public chat page at `/b/<token>`
    with an unguessable token. Visitors chat without signing in.
+5. **Embed it on your website** — the bot page offers two copy-paste
+   snippets (see *Embed on your website* below).
+6. **Connect WhatsApp** — at `/app/whatsapp`, link your Meta WhatsApp app
+   so customers can chat with the bot on WhatsApp (see *WhatsApp* below).
 
 The prompt is the bot's prime directive: tone, menu, prices, hours, rules —
 everything lives in the words the owner wrote. The bot stays in character,
@@ -71,10 +75,63 @@ python3 test_dashboard.py  # signup → create bot from one prompt → edit →
                            # preview chat → public share link → cross-user
                            # isolation → delete
 python3 test_oauth.py      # Google OAuth, new users land on /app/
+python3 test_whatsapp.py    # WhatsApp connector (webhook verify, message
+                           # routing, signatures, isolation) + ?embed=1 +
+                           # website snippets
 python3 test_engine.py      # legacy conversation engine core
 python3 test_platform.py    # multi-tenancy, webhooks
 python3 test_templates.py   # legacy template content
 ```
+
+## Embed on your website
+
+Every bot page (`/app/bots/<id>`) has an **“Add to your website”** section
+with two copy-paste snippets. Both point at `/b/<token>?embed=1` — the
+public chat without any site header/footer, sized for an iframe:
+
+- **Inline frame** — an `<iframe>` you drop straight into your page
+  (`380×560` by default). The 2px ink border matches the BanaoBot design
+  system; tweak `width`/`height` to fit your layout.
+- **Floating bubble** — a ~30-line self-contained script with zero
+  dependencies. It injects a round orange button (`#e85d26`) at the
+  bottom-right of any page; clicking opens the bot chat in an overlay
+  iframe with a close button.
+
+The snippets are built from the request's own host, so they keep working
+wherever the app is deployed.
+
+## WhatsApp (Meta Cloud API)
+
+Connect any bot to WhatsApp at `/app/whatsapp`:
+
+1. Create a Meta app at developers.facebook.com and add the **WhatsApp**
+   product.
+2. Under WhatsApp → API Setup, take the test number's **phone number ID**
+   and generate an **access token** (temporary is fine for testing).
+3. Paste both on the WhatsApp page (optionally an app secret — then Meta's
+   `X-Hub-Signature-256` webhook signatures are verified).
+4. Copy the page's **webhook URL** and **verify token** into Meta's
+   WhatsApp → Configuration → Webhook, and subscribe to the `messages`
+   field.
+5. Pick which of your bots answers, and message the number from WhatsApp.
+
+Incoming text messages are marked as read, run through the linked bot's
+prompt with the owner's brain key (10-turn per-sender memory), and the
+reply goes back through the Graph API. No brain key, no linked bot, or a
+paused connection → the honest “not awake” reply. Non-text messages are
+ignored (200 OK). The endpoint always answers 200 — never 500 — so Meta's
+retries don't pile up.
+
+Honest limits:
+
+- **Production numbers need Meta's app review/approval**; the test sandbox
+  works immediately with a test number.
+- **First reply can be slow on free hosting** — Render sleeps when idle, so
+  a cold start can take ~30 seconds; Meta will retry the webhook.
+- **DEMO_MODE=true** (the default) logs outgoing WhatsApp sends instead of
+  calling Meta — set `DEMO_MODE=false` to actually reply.
+- Conversation memory is **in-memory only** (per server process); a
+  restart clears it. Postgres/Redis would make it durable.
 
 ## Files
 
@@ -84,13 +141,23 @@ python3 test_templates.py   # legacy template content
   (`gemini-3.6-flash` → `gemini-2.5-flash` → `gemini-2.0-flash`).
 - **`storage.py`** — multi-tenant SQLite: `users`, encrypted
   `user_brain_keys` (one Gemini key per owner), `bots` (name, prompt,
-  unguessable `share_token`).
+  unguessable `share_token`), `whatsapp_connections` (encrypted Meta
+  access token + optional app secret, generated verify token, linked bot,
+  enabled flag).
 - **`server.py`** — Flask: landing page, public chat routes
-  (`GET /b/<token>`, `POST /b/<token>/chat`), legacy Meta webhook and demo
-  endpoints; registers `dashboard.bp` at `/app`.
+  (`GET /b/<token>` incl. `?embed=1` chrome-free embed mode,
+  `POST /b/<token>/chat`), legacy Meta webhook and demo endpoints;
+  registers `dashboard.bp` at `/app` and `whatsapp.bp` at `/webhooks`.
+- **`whatsapp.py`** — WhatsApp Cloud API connector:
+  `GET /webhooks/whatsapp` (Meta subscription handshake against the stored
+  verify token), `POST /webhooks/whatsapp` (incoming text → linked bot's
+  prompt via Gemini → Graph API reply; `X-Hub-Signature-256` verification;
+  per-sender in-memory history; always 200, never 500).
 - **`dashboard.py`** + **`templates/dash_*.html`** — auth (email/password +
-  Google OAuth), bot library, prompt builder, bot page (edit prompt, preview
-  chat, copy share link, delete), settings (brain key add/remove).
+  Google OAuth), bot library, prompt builder, bot page (edit prompt, website
+  embed snippets, preview chat, copy share link, delete), WhatsApp connector
+  page (credentials, webhook URL + verify token, bot picker, pause/resume,
+  disconnect), settings (brain key add/remove).
 - **`static/style.css`** — the design system: editorial paper-and-ink,
   Fraunces / Space Grotesk / IBM Plex Mono, cream paper, black ink, orange
   signal. Flat surfaces, hard borders, no gradients.

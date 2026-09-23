@@ -51,10 +51,74 @@
     </div>
   </section>
 
+  <!-- Embed on your website -->
+  <section class="panel" aria-label="Add to your website">
+    <div class="panel-head">
+      <h2><span class="num">03</span> Add to your website</h2>
+    </div>
+    <div class="panel-body">
+      <p class="panel-note">Paste one of these snippets into any site and visitors can chat with <strong>{{ bot.name }}</strong> right there. No dependencies, no accounts.</p>
+
+      {% set iframe_snippet -%}
+<iframe src="{{ embed_url }}" width="380" height="560" style="border:2px solid #16130e; border-radius:12px;" title="Chat with {{ bot.name }}"></iframe>
+{%- endset %}
+      {% set bubble_snippet -%}
+<script>
+(function () {
+  var CHAT_URL = {{ embed_url|tojson }};
+  var btn = document.createElement("button");
+  btn.textContent = "\U0001F4AC";
+  btn.setAttribute("aria-label", "Open chat");
+  btn.style.cssText = "position:fixed;right:20px;bottom:20px;width:60px;height:60px;"
+    + "border-radius:50%;background:#e85d26;border:2px solid #16130e;"
+    + "box-shadow:4px 4px 0 #16130e;font-size:26px;cursor:pointer;z-index:999999;";
+  var panel = document.createElement("div");
+  panel.style.cssText = "position:fixed;right:20px;bottom:96px;"
+    + "width:min(380px,calc(100vw - 40px));height:min(560px,calc(100vh - 130px));"
+    + "border:2px solid #16130e;border-radius:12px;overflow:hidden;"
+    + "box-shadow:6px 6px 0 #16130e;background:#faf6ee;z-index:999999;display:none;";
+  var frame = document.createElement("iframe");
+  frame.src = CHAT_URL;
+  frame.title = "Chat";
+  frame.style.cssText = "width:100%;height:100%;border:0;";
+  var close = document.createElement("button");
+  close.textContent = "\u00D7";
+  close.setAttribute("aria-label", "Close chat");
+  close.style.cssText = "position:absolute;top:8px;right:10px;width:30px;height:30px;"
+    + "border-radius:50%;background:#16130e;color:#faf6ee;border:none;"
+    + "font-size:18px;line-height:1;cursor:pointer;";
+  close.onclick = function () { panel.style.display = "none"; };
+  btn.onclick = function () {
+    panel.style.display = panel.style.display === "none" ? "block" : "none";
+  };
+  panel.appendChild(frame);
+  panel.appendChild(close);
+  document.body.appendChild(btn);
+  document.body.appendChild(panel);
+})();
+</script>
+{%- endset %}
+
+      <div class="snippet-row">
+        <h3>Inline frame</h3>
+        <button type="button" class="btn btn-small" data-copy="#embed-iframe">Copy</button>
+      </div>
+      <p class="panel-note">Drops the chat straight into your page. Tweak <span class="mono">width</span>/<span class="mono">height</span> to fit your layout — the 2px ink border is the design system talking.</p>
+      <textarea id="embed-iframe" class="code-snippet" rows="4" readonly onclick="this.select()">{{ iframe_snippet|forceescape }}</textarea>
+
+      <div class="snippet-row">
+        <h3>Floating bubble</h3>
+        <button type="button" class="btn btn-small" data-copy="#embed-bubble">Copy</button>
+      </div>
+      <p class="panel-note">A round orange button floats bottom-right; clicking it opens the chat in an overlay. Works on any static site.</p>
+      <textarea id="embed-bubble" class="code-snippet" rows="14" readonly onclick="this.select()">{{ bubble_snippet|forceescape }}</textarea>
+    </div>
+  </section>
+
   <!-- Preview chat -->
   <section class="panel" aria-label="Preview chat">
     <div class="panel-head">
-      <h2><span class="num">03</span> Preview chat</h2>
+      <h2><span class="num">04</span> Preview chat</h2>
     </div>
     {% if has_key %}
     <div class="panel-body tight">
@@ -120,6 +184,29 @@
       }
     });
   }
+
+  // Copy embed snippets (generic data-copy buttons)
+  document.querySelectorAll('[data-copy]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var target = document.querySelector(btn.getAttribute('data-copy'));
+      if (!target) return;
+      target.select();
+      var label = btn.textContent;
+      var done = function () {
+        btn.textContent = 'Copied ✓';
+        setTimeout(function () { btn.textContent = label; }, 1800);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(target.value).then(done, function () {
+          document.execCommand('copy');
+          done();
+        });
+      } else {
+        document.execCommand('copy');
+        done();
+      }
+    });
+  });
 
   // Preview chat
   var form = document.getElementById('preview-form');

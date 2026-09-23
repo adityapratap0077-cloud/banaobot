@@ -313,12 +313,14 @@ def bot_detail(bid):
                           name=name or bot["name"], prompt=prompt)
             flash("Bot updated. ✨")
         return redirect(url_for("dashboard.bot_detail", bid=bot["id"]))
+    chat_url = url_for("public_chat", token=bot["share_token"],
+                         _external=True)
     return render_template(
         "dash_bot_detail.html",
         bot=bot,
         has_key=st.has_user_brain_key(session["user_id"]),
-        chat_url=url_for("public_chat", token=bot["share_token"],
-                         _external=True),
+        chat_url=chat_url,
+        embed_url=chat_url + "?embed=1",
         preview_chat_url=url_for("dashboard.bot_chat", bid=bot["id"]),
     )
 
@@ -349,6 +351,65 @@ def bot_chat(bid):
                           ("model", reply[:1500])])[-16:]
     session["preview_history_%d" % bot["id"]] = history
     return jsonify({"ok": True, "reply": reply})
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp connector (Meta WhatsApp Cloud API)
+# ---------------------------------------------------------------------------
+
+@bp.route("/whatsapp", methods=["GET", "POST"])
+@login_required
+def whatsapp_connect():
+    st = store()
+    uid = session["user_id"]
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        if action == "save":
+            pnid = request.form.get("phone_number_id", "").strip()
+            token = request.form.get("access_token", "").strip()
+            secret = request.form.get("app_secret", "").strip()
+            if not pnid:
+                flash("Paste your phone number ID from the Meta dashboard.")
+            elif len(token) < 10:
+                flash("Paste your full WhatsApp access token — "
+                      "it looks too short to be real.")
+            else:
+                try:
+                    st.save_whatsapp_connection(uid, pnid, token, secret)
+                    flash("WhatsApp connected. 🎉 Subscribe the webhook "
+                          "URL in Meta's dashboard to go live.")
+                except ValueError as exc:
+                    flash(str(exc))
+        elif action == "setbot":
+            raw = request.form.get("bot_id", "").strip()
+            bid = int(raw) if raw.isdigit() else None
+            if st.set_whatsapp_bot(uid, bid):
+                flash("Bot linked. Incoming WhatsApp messages will be "
+                      "answered by it.")
+            else:
+                flash("Couldn't link that bot — does it still exist?")
+        elif action == "toggle":
+            conn = st.get_whatsapp_connection(uid)
+            if conn and st.set_whatsapp_enabled(uid, not conn["enabled"]):
+                flash("WhatsApp replies paused."
+                      if conn["enabled"] else "WhatsApp replies resumed. ✅")
+        elif action == "disconnect":
+            st.delete_whatsapp_connection(uid)
+            flash("WhatsApp disconnected. The webhook will ignore your "
+                  "number from now on.")
+        return redirect(url_for("dashboard.whatsapp_connect"))
+    conn = st.get_whatsapp_connection(uid)
+    bots = st.list_bots(uid)
+    return render_template(
+        "dash_whatsapp.html",
+        conn=conn,
+        bots=bots,
+        has_key=st.has_user_brain_key(uid),
+        email=session.get("email"),
+        webhook_url=url_for("whatsapp.webhook_verify", _external=True),
+        demo_mode=os.environ.get("DEMO_MODE", "true").lower()
+        in ("1", "true", "yes"),
+    )
 
 
 # ---------------------------------------------------------------------------

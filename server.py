@@ -69,6 +69,15 @@ try:
 except Exception as exc:  # pragma: no cover - surfaced loudly in logs
     print(f"[banaobot] WARNING: dashboard not loaded: {exc}")
 
+# WhatsApp Cloud API connector (prompt-first bots). Same optional-import
+# pattern: the site works fine without it.
+try:
+    import whatsapp  # noqa: E402
+    app.register_blueprint(whatsapp.bp, url_prefix="/webhooks")
+    print("[banaobot] whatsapp connector mounted at /webhooks/")
+except Exception as exc:  # pragma: no cover - surfaced loudly in logs
+    print(f"[banaobot] WARNING: whatsapp connector not loaded: {exc}")
+
 
 # ---------------------------------------------------------------------------
 # Outgoing messages
@@ -249,7 +258,14 @@ def index():
 def public_chat(token):
     bot = store.get_bot_by_token(token or "")
     if bot is None:
+        if request.args.get("embed") == "1":
+            return Response("Unknown bot.", status=404,
+                            mimetype="text/plain")
         return render_template("public_404.html"), 404
+    if request.args.get("embed") == "1":
+        # Iframe-friendly embed: the chat shell only, no site header,
+        # footer, or landing chrome.
+        return render_template("public_embed.html", bot=bot)
     return render_template("public_chat.html", bot=bot)
 
 
