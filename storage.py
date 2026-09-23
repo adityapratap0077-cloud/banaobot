@@ -521,8 +521,49 @@ class Store:
         except Exception:
             pass
 
+    def _reconnect(self):
+        """Drop the current connection and open a fresh one.
+
+        Called when the long-lived connection died. Safe to call on a
+        healthy connection too (just churns it).
+        """
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+        self._conn = get_conn(self.path)
+
+    def _ensure_live(self):
+        """Make sure the Postgres connection is usable, reconnecting if
+        it died.
+
+        Each gunicorn worker keeps one long-lived connection. Render's
+        free Postgres can drop idle connections (deploys, restarts,
+        network blips); without this check a dead connection makes every
+        DB-touching request 500 until the next deploy — exactly the
+        outage debugged on 2026-09-23 (signup/login/settings all 500d
+        while the database itself was perfectly healthy).
+        """
+        if not self._pg:
+            return
+        try:
+            # Clear any aborted-transaction state left by a previous
+            # failure; a no-op on a healthy idle connection.
+            self._conn.rollback()
+        except Exception:
+            pass
+        try:
+            if self._conn.closed:
+                raise RuntimeError("connection closed")
+            probe = self._conn.cursor()
+            probe.execute("SELECT 1")
+            probe.close()
+        except Exception:
+            self._reconnect()
+
     @contextmanager
     def _cur(self):
+        self._ensure_live()
         cur = _Cursor(self._conn)
         try:
             yield cur

@@ -49,31 +49,6 @@ def store():
     return current_app.config["store"]
 
 
-@bp.route("/_diag_db")
-def _diag_db():
-    """TEMPORARY production diagnostic: exercise the DB and return any
-    traceback as JSON. Removed before the real fix ships."""
-    import time
-    import traceback as tb_mod
-    from flask import jsonify
-    info = {"ts": time.time()}
-    try:
-        st = store()
-        info["is_pg"] = st._pg
-        info["lookup"] = bool(st.get_user_by_email("diag_probe@example.com"))
-        probe = "diag_probe_%d@example.com" % int(time.time())
-        uid = st.create_user(probe, "x")
-        info["create_uid"] = uid
-        return jsonify(info)
-    except Exception as exc:
-        try:
-            store()._conn.rollback()
-        except Exception:
-            pass
-        return jsonify({"error": str(exc),
-                        "traceback": tb_mod.format_exc()}), 500
-
-
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
