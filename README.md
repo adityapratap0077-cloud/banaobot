@@ -1,14 +1,23 @@
-# BanaoBot — describe your bot. It's ready.
+<div align="center">
 
-> 🌐 **Live:** https://banaobot.onrender.com
+# BANAOBOT
+### Describe your bot. It's ready. — Prompt-first AI chatbot builder
 
-BanaoBot is a prompt-first AI chatbot builder. Sign in, write **one prompt**
-describing your bot's purpose, behaviour, tone, and knowledge — and it's
-ready. Every bot gets a **public chat link** you can share with anyone.
-No templates, no onboarding wizards, no menu builders.
+![BanaoBot](https://img.shields.io/badge/BANAOBOT-2026-%23F2F0EB?style=for-the-badge&labelColor=%23060608)
+![Live](https://img.shields.io/badge/LIVE-banaobot.onrender.com-%237A1212?style=for-the-badge&labelColor=%23060608)
+![License](https://img.shields.io/badge/License-MIT-%23060608?style=for-the-badge)
 
-Python + Flask + SQLite. The AI brain runs on Google's Gemini API, using the
-owner's own key (free tier available from Google AI Studio).
+**Sign up. Write one prompt. Share the link.**
+
+[Launch BanaoBot](https://banaobot.onrender.com) • [GitHub](https://github.com/adityapratap0077-cloud)
+
+</div>
+
+---
+
+BanaoBot is a prompt-first AI chatbot builder. Sign in, write **one prompt** describing your bot's purpose, behaviour, tone, and knowledge — and it's ready. Every bot gets a **public chat link** you can share with anyone. No templates, no onboarding wizards, no menu builders.
+
+Python + Flask + PostgreSQL (Render) / SQLite (local). The AI brain runs on **Google's Gemini API using your own key** (free tier from Google AI Studio) — one encrypted key per owner, shared by all your bots.
 
 ## How it works
 
@@ -20,23 +29,34 @@ Gemini (owner's key) → in-character reply
 ```
 
 1. **Sign up** at `/app/signup` (email/password or Google).
-2. **Create a bot** — give it a name and one prompt. Three example prompts
-   (café front desk, personal AI twin, tuition teacher) are one tap away.
-3. **Preview & test** the live AI chat right on the bot page.
-4. **Share the link** — every bot has a public chat page at `/b/<token>`
-   with an unguessable token. Visitors chat without signing in.
-5. **Embed it on your website** — the bot page offers two copy-paste
-   snippets (see *Embed on your website* below).
-6. **Connect WhatsApp** — at `/app/whatsapp`, link your Meta WhatsApp app
-   so customers can chat with the bot on WhatsApp (see *WhatsApp* below).
+2. **Add your Gemini key** in Settings — without a key the bot honestly says it isn't awake yet; no fake rule-based replies pretending to be AI.
+3. **Create a bot** — give it a name and one prompt. Example prompts (café front desk, personal AI twin, tuition teacher) are one tap away.
+4. **Preview & test** the live AI chat right on the bot page, with owner-only diagnostics when something fails (bad key, quota, network — visitors never see these).
+5. **Share the link** — every bot has a public chat page at `/b/<token>` with an unguessable token. Visitors chat without signing in.
+6. **Embed it on your website** — every bot page offers two copy-paste snippets: an inline iframe (`/b/<token>?embed=1`) and a floating bubble script with zero dependencies.
 
-The prompt is the bot's prime directive: tone, menu, prices, hours, rules —
-everything lives in the words the owner wrote. The bot stays in character,
-remembers the conversation, and never reveals the prompt to visitors.
+The prompt is the bot's prime directive: tone, menu, prices, hours, rules — everything lives in the words you wrote. The bot stays in character, remembers the conversation, and never reveals the prompt to visitors.
 
-One Gemini key per owner, stored encrypted (`user_brain_keys`), shared by
-all of their bots. Without a key the bot honestly says it isn't awake yet —
-no fake rule-based replies pretending to be AI.
+## Features
+
+- **One-prompt bot creation** — purpose, behaviour, tone, knowledge in plain words
+- **Your Gemini key** — stored encrypted, shared across your bots; model fallback chain (`gemini-3.6-flash` → `2.5-flash` → `2.0-flash`)
+- **Public share links** — `/b/<token>`, unguessable, no login needed for visitors
+- **Website embeds** — inline iframe + floating bubble, themed to your brand color
+- **Build from your website** — paste a site URL; the app fetches it, extracts a brief (name, offerings, prices, hours, theme color) and drafts your bot's prompt. SSRF-guarded, honest when a site is too JS-heavy to read
+- **Menu-to-catalogue helper** — `menu_import.py` parses pasted menu text or a menu photo/PDF (free OCR.space tier) into structured items with categories and prices, tuned for Indian menus in English, Hindi (Devanagari), and Hinglish. It ships as a tested helper module, not yet wired into the dashboard UI
+- **WhatsApp connector** — full Meta Cloud API wiring (`/app/whatsapp`, webhook verification, signature checks, per-sender memory). See Honest limitations below
+
+## WhatsApp — demo/simulation mode by default
+
+The WhatsApp integration is fully built: link your Meta WhatsApp app at `/app/whatsapp`, and incoming messages run through your bot's prompt with your Gemini key. But it is **not live WhatsApp delivery**:
+
+- **Demo mode is the default** — `DEMO_MODE=true` (how production is deployed) *logs outgoing WhatsApp sends instead of calling Meta*. No message actually reaches WhatsApp.
+- **Real delivery** needs your own Meta app credentials (phone number ID + access token) *and* `DEMO_MODE=false` — plus Meta's app review for production numbers.
+- **Cold starts** on free hosting — Render sleeps when idle; a first visit after sleep can take ~30 seconds, which is slow enough that Meta may retry the webhook.
+- **In-memory conversation memory** — per-sender history clears on restart.
+
+Until those are flipped, treat WhatsApp as a working connector in simulation mode.
 
 ## Run locally
 
@@ -51,215 +71,69 @@ Production (gunicorn, as deployed on Render):
 gunicorn server:app --bind 0.0.0.0:$PORT --workers 2
 ```
 
-Then open:
+Set `BANAOBOT_DB` to override the SQLite path. Set `DATABASE_URL` to use PostgreSQL (Render): the app then stores users, bots, and encrypted keys in Postgres so data survives deploys and restarts — without it, everything is local SQLite, which is fine for dev only. `BANAOBOT_SECRET` encrypts credentials and signs sessions; `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` enable Google sign-in.
 
-| URL | What it is |
-|---|---|
-| `http://localhost:5000/` | Landing page |
-| `http://localhost:5000/app/` | Bot library (sign in) |
-| `http://localhost:5000/app/bots/new` | Prompt builder |
-| `http://localhost:5000/app/bots/<id>` | Bot page: edit prompt, preview chat, share link |
-| `http://localhost:5000/app/settings` | Brain key settings (encrypted Gemini key) |
-| `http://localhost:5000/b/<token>` | Public chat page (no login needed) |
-
-Set `BANAOBOT_DB` to override the SQLite path (default `bot.db` next to
-`server.py`). Set `DATABASE_URL` to use PostgreSQL instead of SQLite
-(e.g. Render's Postgres `DATABASE_URL`): the app then stores users, bots,
-and encrypted keys in Postgres, so data survives deploys and restarts.
-Without `DATABASE_URL` everything runs on SQLite — local dev and all
-tests use SQLite. `BANAOBOT_SECRET` encrypts credentials and signs
-sessions; `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` enable Google
-sign-in.
-
-Run the test suites:
+## Test suites
 
 ```bash
-python3 test_brain.py      # prompt-driven Gemini chat, model fallback chain,
-                           # missing-key + error states, legacy brain checks
-python3 test_dashboard.py  # signup → create bot from one prompt → edit →
-                           # preview chat → public share link → cross-user
-                           # isolation → delete
-python3 test_oauth.py      # Google OAuth, new users land on /app/
-python3 test_whatsapp.py    # WhatsApp connector (webhook verify, message
-                           # routing, signatures, isolation) + ?embed=1 +
-                           # website snippets
-python3 test_sitefetch.py   # build-from-website (fetch, brief extraction,
-                           # theme detection, prompt generation, SSRF guards,
-                           # endpoint, chat theming, column migration)
-python3 test_postgres_compat.py  # storage dual-dialect layer (placeholder
-                           # translation, PG/SQLite DDL, insert_returning_id,
-                           # row normalization) — SQLite only, no live PG
-python3 test_engine.py      # legacy conversation engine core
+python3 test_brain.py       # prompt-driven Gemini chat, model fallback, missing-key + error states
+python3 test_dashboard.py    # signup → create bot from one prompt → edit → preview → share link → isolation → delete
+python3 test_oauth.py        # Google OAuth, new users land on /app/
+python3 test_whatsapp.py    # WhatsApp connector: webhook verify, routing, signatures, isolation, embeds
+python3 test_sitefetch.py   # build-from-website: fetch, brief extraction, theme detection, SSRF guards
+python3 test_postgres_compat.py  # dual-dialect storage layer (SQLite-only, no live PG)
+python3 test_engine.py       # legacy conversation engine core
 python3 test_platform.py    # multi-tenancy, webhooks
 python3 test_templates.py   # legacy template content
 ```
 
-## Build from your website
+## Honest limitations (fix before real clients)
 
-On the new-bot page (`/app/bots/new`), **“Build from your website”** sits
-above the manual prompt form. Paste your site's address, hit
-**“Fetch my website →”**, and the app:
+- **Free Postgres expires** — Render's free Postgres has an expiry date (check the Render dashboard). The long-term move is a persistent provider before real client data depends on it.
+- **Gemini cost** — every chat message calls the owner's key. The free tier is generous, but heavy traffic needs quota monitoring and per-bot rate limits first.
+- **Prompt injection** — the bot follows the owner's prompt, but a clever visitor can try to steer it off-script. Keep sensitive data out of prompts.
+- **Security hardening** — add CSRF protection and rate limiting to `/app/*` forms and the public chat endpoint before real clients.
+- **Cold starts** — free Render sleeps after ~15 min of inactivity; first visit after sleep takes ~30s.
 
-1. **Fetches the page** (`POST /app/fetch-site`, login required, 10
-   fetches per user per hour) with a real browser User-Agent, 10s
-   timeout, ~2MB cap, and up to 5 redirects.
-2. **Extracts a brief** — business name (`og:site_name` → `<title>` →
-   hostname), tagline (meta description), about paragraphs, offerings
-   (headings + list items, deduped, ~20), prices (₹/$/€/£ fragments, ~10),
-   hours (~5), contact info (phone/email/address, 5), and a one-line tone
-   guess. Navigation, header, footer, script, and style noise is ignored.
-   **JavaScript-rendered sites are handled too:** `<noscript>` fallbacks
-   are read, JSON-LD / `__NEXT_DATA__` blocks are parsed for prose, and
-   content-like string literals in JS bundles are harvested (framework
-   boilerplate such as `React.createElement` is filtered out). Paste a
-   bare domain like `example.com` and `https://` is prepended for you.
-   When the recovered text is thin (under ~60 description words and fewer
-   than 3 offerings), the response carries `thin: true` plus an honest
-   note — shown under the fetch block — explaining the site loads its
-   content with JavaScript, so the draft is only a starting point.
-3. **Detects your theme** — `<meta name="theme-color">` first, else the
-   most frequent non-gray hex color in the site's CSS; also picks up the
-   logo (`og:image` or favicon).
-4. **Drafts the bot** — the name and prompt fields are autofilled with a
-   full prompt in the BanaoBot voice (identity, tone, a facts section,
-   strict never-invent-prices rules). A detected brand color fills the
-   hidden theme field and shows a swatch.
+---
 
-The prompt stays fully editable — the manual path works exactly as
-before. Creating the bot saves `website_url` + `theme_color`, and the
-public chat page (`/b/<token>`, including `?embed=1`) wears the brand
-color on its chat accents (send button, avatar, header rule) instead of
-the default orange.
+## Design System
 
-Safety: only `http(s)` URLs are accepted (embedded credentials rejected);
-every fetch hop is DNS-resolved and rejected when it points at a
-private, loopback, link-local, multicast, or reserved address (SSRF
-guard); errors are honest UI messages, never tracebacks.
+Editorial paper-and-ink — the bot that feels like a printed page.
 
-Honest limitations: JavaScript-heavy sites (content rendered
-client-side) may yield thin briefs — the generated prompt then says so
-and stays gracefully vague instead of hallucinating. You can always edit
-the prompt by hand afterwards.
+### Color Palette
 
-**Owner preview diagnostics:** when the logged-in owner's preview chat
-fails, the reply appends a plain-language owner-only note (bad brain
-key → re-check Settings → Brain key; quota → wait or check Google AI
-Studio; network → try again shortly; retired models → app update
-needed). Public visitors and WhatsApp chats never see these notes — they
-keep the generic honest messages.
+| Color | Hex | Usage |
+| :--- | :--- | :--- |
+| Cream Paper | `#F5F1E8` | Background |
+| Black Ink | `#111111` | Text |
+| Signal Orange | `#E85D26` | Accent — send button, bubble, header rule |
 
-## Embed on your website
+### Typography
 
-Every bot page (`/app/bots/<id>`) has an **“Add to your website”** section
-with two copy-paste snippets. Both point at `/b/<token>?embed=1` — the
-public chat without any site header/footer, sized for an iframe:
+- **Display:** Fraunces — editorial serif
+- **Body:** Space Grotesk — clean, modern
+- **Mono:** IBM Plex Mono — technical labels
 
-- **Inline frame** — an `<iframe>` you drop straight into your page
-  (`380×560` by default). The 2px ink border matches the BanaoBot design
-  system; tweak `width`/`height` to fit your layout.
-- **Floating bubble** — a ~30-line self-contained script with zero
-  dependencies. It injects a round orange button (`#e85d26`) at the
-  bottom-right of any page; clicking opens the bot chat in an overlay
-  iframe with a close button.
+Flat surfaces, hard borders, no gradients.
 
-The snippets are built from the request's own host, so they keep working
-wherever the app is deployed.
+---
 
-## WhatsApp (Meta Cloud API)
+## Tech Stack
 
-Connect any bot to WhatsApp at `/app/whatsapp`:
+`Python / Flask / PostgreSQL / SQLite / Gemini API / gunicorn / Render`
 
-1. Create a Meta app at developers.facebook.com and add the **WhatsApp**
-   product.
-2. Under WhatsApp → API Setup, take the test number's **phone number ID**
-   and generate an **access token** (temporary is fine for testing).
-3. Paste both on the WhatsApp page (optionally an app secret — then Meta's
-   `X-Hub-Signature-256` webhook signatures are verified).
-4. Copy the page's **webhook URL** and **verify token** into Meta's
-   WhatsApp → Configuration → Webhook, and subscribe to the `messages`
-   field.
-5. Pick which of your bots answers, and message the number from WhatsApp.
+## Deploy
 
-Incoming text messages are marked as read, run through the linked bot's
-prompt with the owner's brain key (10-turn per-sender memory), and the
-reply goes back through the Graph API. No brain key, no linked bot, or a
-paused connection → the honest “not awake” reply. Non-text messages are
-ignored (200 OK). The endpoint always answers 200 — never 500 — so Meta's
-retries don't pile up.
+Render web service: `render.yaml` included. Push to `main` and Render redeploys.
 
-Honest limits:
+---
 
-- **Production numbers need Meta's app review/approval**; the test sandbox
-  works immediately with a test number.
-- **First reply can be slow on free hosting** — Render sleeps when idle, so
-  a cold start can take ~30 seconds; Meta will retry the webhook.
-- **DEMO_MODE=true** (the default) logs outgoing WhatsApp sends instead of
-  calling Meta — set `DEMO_MODE=false` to actually reply.
-- Conversation memory is **in-memory only** (per server process); a
-  restart clears it. Postgres/Redis would make it durable.
+## Author
 
-## Files
+**Aditya Pratap** — Creative Technologist
+Gorakhpur, India — github.com/adityapratap0077-cloud
 
-- **`brain.py`** — `chat_with_prompt(api_key, bot_name, owner_prompt,
-  history, user_text)`: builds the system prompt from the owner's words and
-  calls Gemini with the model fallback chain
-  (`gemini-3.6-flash` → `gemini-2.5-flash` → `gemini-2.0-flash`).
-  `chat_with_prompt_explained(...)` returns `(reply, err_code)` with
-  `err_code` in `no_key | bad_key | quota | network | garbled |
-  models_retired`; `owner_note_for(err_code)` renders the owner-only
-  diagnosis shown in the preview chat. Visitor-facing messages never
-  change and never leak key material.
-- **`storage.py`** — multi-tenant storage: `users`, encrypted
-  `user_brain_keys` (one Gemini key per owner), `bots` (name, prompt,
-  unguessable `share_token`), `whatsapp_connections` (encrypted Meta
-  access token + optional app secret, generated verify token, linked bot,
-  enabled flag). **SQLite by default; PostgreSQL when `DATABASE_URL` is
-  set** (psycopg2). All SQL uses `?` placeholders translated to `%s` for
-  Postgres by a single helper; `insert_returning_id()` covers
-  `lastrowid` vs `RETURNING id`; DDL is dialect-aware (`BIGSERIAL` on
-  Postgres); timestamps are Python-generated UTC ISO strings; rows come
-  back as plain dicts on both drivers. `get_conn()` / `init_db()` are the
-  import surface.
-- **`server.py`** — Flask: landing page, public chat routes
-  (`GET /b/<token>` incl. `?embed=1` chrome-free embed mode,
-  `POST /b/<token>/chat`), legacy Meta webhook and demo endpoints;
-  registers `dashboard.bp` at `/app` and `whatsapp.bp` at `/webhooks`.
-- **`whatsapp.py`** — WhatsApp Cloud API connector:
-  `GET /webhooks/whatsapp` (Meta subscription handshake against the stored
-  verify token), `POST /webhooks/whatsapp` (incoming text → linked bot's
-  prompt via Gemini → Graph API reply; `X-Hub-Signature-256` verification;
-  per-sender in-memory history; always 200, never 500).
-- **`dashboard.py`** + **`templates/dash_*.html`** — auth (email/password +
-  Google OAuth), bot library, prompt builder, bot page (edit prompt, website
-  embed snippets, preview chat, copy share link, delete), WhatsApp connector
-  page (credentials, webhook URL + verify token, bot picker, pause/resume,
-  disconnect), settings (brain key add/remove).
-- **`static/style.css`** — the design system: editorial paper-and-ink,
-  Fraunces / Space Grotesk / IBM Plex Mono, cream paper, black ink, orange
-  signal. Flat surfaces, hard borders, no gradients.
-- **`engine.py`, `templates.py`, `phrasing.py`, `content.py`** — legacy
-  template-based bot core; kept for the old demo/webhook paths, not part of
-  the prompt-first product.
+## License
 
-## Production limitations (fix before real clients)
-
-- **Infra** — set `DATABASE_URL` and the app runs on Postgres instead of
-  SQLite, so users, bots, and keys survive deploys and restarts (Render's
-  free web-service disk is ephemeral — `bot.db` is wiped on every
-  deploy/restart). Note: Render's **free Postgres also expires** (check
-  the Render dashboard for the date); treat it as semi-durable. The
-  long-term move is a persistent provider (paid Postgres or similar)
-  before real client data depends on it. Without `DATABASE_URL` the app
-  falls back to SQLite — fine for local dev only.
-- **Gemini cost** — every chat message calls the owner's Gemini key. The
-  free tier is generous, but heavy traffic needs quota monitoring; add
-  per-bot rate limits before real clients.
-- **Prompt injection** — the bot follows the owner's prompt; a clever
-  visitor can still try to steer it off-script. Keep sensitive data out of
-  prompts.
-- **Security hardening** — add CSRF protection and rate limiting to
-  `/app/*` forms and the public chat endpoint.
-- **WhatsApp** — not connected. Real WhatsApp needs Meta Business/Cloud
-  API, a dedicated number, webhooks, and approval (separate work).
-- **Cold starts** — free Render sleeps after ~15 min of inactivity; first
-  visit after sleep takes ~30s.
+MIT © Aditya Pratap
