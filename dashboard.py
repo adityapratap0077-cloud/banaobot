@@ -400,10 +400,12 @@ def whatsapp_connect():
         return redirect(url_for("dashboard.whatsapp_connect"))
     conn = st.get_whatsapp_connection(uid)
     bots = st.list_bots(uid)
+    preselect = request.args.get("bot", "")
     return render_template(
         "dash_whatsapp.html",
         conn=conn,
         bots=bots,
+        preselect_bot=int(preselect) if preselect.isdigit() else None,
         has_key=st.has_user_brain_key(uid),
         email=session.get("email"),
         webhook_url=url_for("whatsapp.webhook_verify", _external=True),

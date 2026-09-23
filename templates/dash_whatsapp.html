@@ -100,7 +100,7 @@
           <select id="bot_id" name="bot_id">
             <option value="">— none —</option>
             {% for b in bots %}
-            <option value="{{ b.id }}" {% if conn.bot_id == b.id %}selected{% endif %}>{{ b.name }}</option>
+            <option value="{{ b.id }}" {% if (conn and conn.bot_id == b.id) or (preselect_bot == b.id) %}selected{% endif %}>{{ b.name }}</option>
             {% endfor %}
           </select>
         </div>

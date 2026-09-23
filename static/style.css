@@ -1174,3 +1174,62 @@ button.btn { font: inherit; font-family: var(--font-mono); }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Deploy-everywhere cards (dashboard home) */
+.deploy-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+.deploy-card {
+  border: 2px solid #16130e;
+  border-radius: 10px;
+  padding: 18px;
+  background: #faf6ee;
+  box-shadow: 4px 4px 0 #16130e;
+}
+.deploy-card h3 {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.15rem;
+  margin: 0 0 8px;
+}
+.deploy-card p {
+  margin: 0 0 14px;
+  color: #4a4438;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+/* Numbered how-to steps */
+.howto {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+  counter-reset: howto;
+  display: grid;
+  gap: 12px;
+}
+.howto li {
+  counter-increment: howto;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  border: 2px solid #16130e;
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: #fffdf8;
+}
+.howto li::before {
+  content: counter(howto, decimal-leading-zero);
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 700;
+  color: #e85d26;
+  flex: none;
+}
+.howto li p { margin: 0; line-height: 1.55; }
+.howto li strong { font-weight: 700; }
+
+@media (max-width: 720px) {
+  .deploy-grid { grid-template-columns: 1fr; }
+}

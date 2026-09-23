@@ -115,10 +115,21 @@
     </div>
   </section>
 
+  <!-- Deploy to WhatsApp -->
+  <section class="panel" aria-label="Deploy to WhatsApp">
+    <div class="panel-head">
+      <h2><span class="num">04</span> Deploy to WhatsApp</h2>
+    </div>
+    <div class="panel-body">
+      <p class="panel-note">Let customers talk to <strong>{{ bot.name }}</strong> on WhatsApp through Meta's Cloud API. You'll connect your WhatsApp number once, then pick which bot answers.</p>
+      <a class="btn btn-accent" href="/app/whatsapp?bot={{ bot.id }}">Add to WhatsApp &rarr;</a>
+    </div>
+  </section>
+
   <!-- Preview chat -->
   <section class="panel" aria-label="Preview chat">
     <div class="panel-head">
-      <h2><span class="num">04</span> Preview chat</h2>
+      <h2><span class="num">05</span> Preview chat</h2>
     </div>
     {% if has_key %}
     <div class="panel-body tight">
