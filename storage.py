@@ -483,13 +483,35 @@ class Store:
         # Postgres mode.
         self._conn = get_conn(path)
         self._pg = dialect_of(self._conn) == "postgres"
-        tables_before = _table_names(self._conn)
-        _exec_script(self._conn,
-                     _postgres_ddl() if self._pg else SCHEMA)
-        self._conn.commit()
-        self._maybe_migrate(tables_before)
-        self._ensure_template_columns()
-        self._seed_templates()
+        if self._pg:
+            # Serialize schema init across gunicorn workers. On a fresh
+            # database, concurrent CREATE TABLE (BIGSERIAL implicitly
+            # creates sequences) from two workers races and the loser
+            # dies with UniqueViolation on pg_class_relname_nsp_index —
+            # which fails the whole Render deploy (build succeeds, the
+            # new instances crash on boot). Session-level lock, not
+            # xact-level: the migrate/seed helpers commit, which would
+            # release an xact-level lock early. Released in `finally`,
+            # so a crash can never wedge later boots.
+            execute(
+                self._conn,
+                "SELECT pg_advisory_lock(hashtext('banaobot_schema_init'))",
+            ).close()
+        try:
+            tables_before = _table_names(self._conn)
+            _exec_script(self._conn,
+                         _postgres_ddl() if self._pg else SCHEMA)
+            self._conn.commit()
+            self._maybe_migrate(tables_before)
+            self._ensure_template_columns()
+            self._seed_templates()
+        finally:
+            if self._pg:
+                execute(
+                    self._conn,
+                    "SELECT pg_advisory_unlock("
+                    "hashtext('banaobot_schema_init'))",
+                ).close()
         self._default_biz_id = None
 
     def close(self):
