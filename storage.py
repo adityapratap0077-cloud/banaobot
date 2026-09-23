@@ -39,6 +39,7 @@ import time
 from contextlib import contextmanager
 
 import templates
+import sitefetch
 from content import FAQS, MENU, RESTAURANT, STR
 
 SCHEMA = """
@@ -59,6 +60,8 @@ CREATE TABLE IF NOT EXISTS bots (
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name       TEXT NOT NULL,
     prompt     TEXT NOT NULL,
+    website_url TEXT,
+    theme_color TEXT,
     share_token TEXT UNIQUE NOT NULL,
     created_at INTEGER NOT NULL
 );
@@ -277,9 +280,21 @@ class Store:
                 self._conn.execute(f"DROP TABLE IF EXISTS {t}")
             self._conn.commit()
         self._migrate_users_google_sub()
+        self._migrate_bots_website_columns()
         if fresh:
             self._seed_bhoj_house()
             self._seed_aditya()
+
+    def _migrate_bots_website_columns(self):
+        """Add bots.website_url / bots.theme_color to DBs made before the
+        build-from-website feature (ALTER TABLE if the column is missing)."""
+        cols = {r["name"]
+                for r in self._conn.execute("PRAGMA table_info(bots)")}
+        for col in ("website_url", "theme_color"):
+            if col not in cols:
+                self._conn.execute(
+                    "ALTER TABLE bots ADD COLUMN %s TEXT" % col)
+        self._conn.commit()
 
     def _migrate_users_google_sub(self):
         """Add users.google_sub to DBs created before Google sign-in."""
@@ -669,18 +684,26 @@ class Store:
         import secrets as _secrets
         return _secrets.token_urlsafe(24)
 
-    def create_bot(self, user_id, name, prompt):
-        """Create a bot for this owner. Returns the bot id."""
+    def create_bot(self, user_id, name, prompt, website_url=None,
+                   theme_color=None):
+        """Create a bot for this owner. Returns the bot id.
+
+        website_url / theme_color come from the build-from-website flow;
+        theme_color is strictly normalized to "#rrggbb" or stored as None.
+        """
         name = (name or "").strip() or "My bot"
         token = self._new_share_token()
+        website_url = (website_url or "").strip() or None
+        theme_color = sitefetch.normalize_theme_hex(theme_color)
         with self._cur() as cur:
             for _ in range(5):  # astronomically unlikely to loop
                 try:
                     cur.execute(
-                        "INSERT INTO bots (user_id, name, prompt, share_token,"
-                        " created_at) VALUES (?,?,?,?,?)",
+                        "INSERT INTO bots (user_id, name, prompt,"
+                        " website_url, theme_color, share_token,"
+                        " created_at) VALUES (?,?,?,?,?,?,?)",
                         (user_id, name, (prompt or "").strip(),
-                         token, int(time.time())),
+                         website_url, theme_color, token, int(time.time())),
                     )
                     return cur.lastrowid
                 except sqlite3.IntegrityError:
@@ -716,7 +739,8 @@ class Store:
             ).fetchone()
         return dict(row) if row else None
 
-    def update_bot(self, bot_id, user_id, name=None, prompt=None):
+    def update_bot(self, bot_id, user_id, name=None, prompt=None,
+                   website_url=None, theme_color=None):
         """Owner-scoped update. Returns True when the bot exists and the
         owner matches."""
         bot = self.get_bot(bot_id, user_id)
@@ -727,6 +751,11 @@ class Store:
             fields["name"] = (name or "").strip() or bot["name"]
         if prompt is not None:
             fields["prompt"] = (prompt or "").strip()
+        if website_url is not None:
+            fields["website_url"] = (website_url or "").strip() or None
+        if theme_color is not None:
+            fields["theme_color"] = sitefetch.normalize_theme_hex(
+                theme_color)
         if not fields:
             return True
         sets = ", ".join(f"{k}=?" for k in fields)

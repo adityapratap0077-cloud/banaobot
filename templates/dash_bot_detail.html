@@ -9,6 +9,10 @@
       <p class="kicker">Bot file Nº {{ bot.id }}</p>
       <h1>{{ bot.name }}</h1>
       <p class="sub">Prompt, share link, and a live preview &mdash; everything in one place.</p>
+      {% if bot.website_url %}
+      {% set tc = bot.theme_color|themehex %}
+      <p class="sub" style="margin-top: 6px;">Built from <a href="{{ bot.website_url }}" target="_blank" rel="noopener">{{ bot.website_url }}</a>{% if tc %}<span class="theme-swatch" style="background: {{ tc }};" title="Detected brand colour"></span>{% endif %}</p>
+      {% endif %}
     </div>
     <a class="btn btn-paper" href="/app/">&larr; All bots</a>
   </div>

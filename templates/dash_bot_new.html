@@ -19,7 +19,30 @@
   </div>
   {% endif %}
 
+  <section class="panel" aria-label="Build from your website" style="max-width: 760px;">
+    <div class="panel-head">
+      <h2><span class="num">&#10022;</span> Build from your website</h2>
+    </div>
+    <div class="panel-body">
+      <p class="panel-note">No prompt? No problem. Paste your site's address and we'll read it &mdash; what you do, your offerings, prices, hours, even your brand colour &mdash; and draft the whole bot for you. Everything stays editable below.</p>
+      <div class="field" style="margin-bottom: 0;">
+        <label for="site-url">Your website</label>
+        <div class="sitefetch-row">
+          <input type="url" id="site-url" name="site-url" placeholder="https://yourbusiness.com" autocomplete="off" spellcheck="false">
+          <button type="button" id="site-fetch" class="btn btn-accent">Fetch my website &rarr;</button>
+        </div>
+      </div>
+      <p class="hint" id="site-status" role="status" hidden></p>
+      <p class="hint" id="site-theme" hidden>
+        <span class="theme-swatch" id="site-swatch" aria-hidden="true"></span>
+        <span id="site-theme-text"></span>
+      </p>
+    </div>
+  </section>
+
   <form method="post" action="/app/bots/new" style="max-width: 760px;">
+    <input type="hidden" name="website_url" id="website_url" value="{{ website_url or '' }}">
+    <input type="hidden" name="theme_color" id="theme_color" value="{{ theme_color or '' }}">
     <div class="field">
       <label for="name">Bot name <span class="req">*</span></label>
       <input type="text" id="name" name="name" value="{{ name or '' }}" placeholder="e.g. Chai Sutta Café, Professor Verma, Aditya After Dark" required maxlength="80">
@@ -129,6 +152,70 @@ RULES:
       }
     });
   });
+
+  // Build from website: fetch the site, autofill name + prompt + theme.
+  var fetchBtn = document.getElementById('site-fetch');
+  var urlInput = document.getElementById('site-url');
+  var status = document.getElementById('site-status');
+  var themeNote = document.getElementById('site-theme');
+  var themeSwatch = document.getElementById('site-swatch');
+  var themeText = document.getElementById('site-theme-text');
+  var hiddenUrl = document.getElementById('website_url');
+  var hiddenTheme = document.getElementById('theme_color');
+  var nameInput = document.getElementById('name');
+
+  function setStatus(msg, kind) {
+    status.hidden = false;
+    status.textContent = msg;
+    status.className = 'hint' + (kind ? ' ' + kind : '');
+  }
+
+  if (fetchBtn) {
+    fetchBtn.addEventListener('click', function () {
+      var url = urlInput.value.trim();
+      themeNote.hidden = true;
+      if (!url) {
+        setStatus('Paste your website address first.', 'err');
+        urlInput.focus();
+        return;
+      }
+      fetchBtn.disabled = true;
+      setStatus('Reading your website — this takes a few seconds…');
+      fetch('/app/fetch-site', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url })
+      })
+        .then(function (res) {
+          return res.json().then(function (data) {
+            return { status: res.status, body: data };
+          });
+        })
+        .then(function (res) {
+          fetchBtn.disabled = false;
+          var d = res.body || {};
+          if (!d.ok) {
+            setStatus(d.error || 'Could not read that website.', 'err');
+            return;
+          }
+          if (nameInput && d.name) nameInput.value = d.name;
+          if (ta && d.prompt) ta.value = d.prompt;
+          if (hiddenUrl) hiddenUrl.value = d.url || url;
+          if (hiddenTheme) hiddenTheme.value = d.theme_color || '';
+          if (d.theme_color) {
+            themeSwatch.style.background = d.theme_color;
+            themeText.textContent = 'Detected your brand colour — the chat page will wear it.';
+            themeNote.hidden = false;
+          }
+          setStatus('Done — your bot draft is below. Edit anything you like, then hit "Create my bot".', 'ok');
+          ta.focus();
+        })
+        .catch(function () {
+          fetchBtn.disabled = false;
+          setStatus('Something went wrong talking to the server. Try again in a moment.', 'err');
+        });
+    });
+  }
 })();
 </script>
 {% endblock %}

@@ -15,6 +15,9 @@
     .embed-shell .chat-shell { flex: 1; display: flex; flex-direction: column; border: none; box-shadow: none; border-radius: 0; }
     .embed-shell .chat-log { flex: 1; max-height: none; }
     .embed-shell .chat-head { border-bottom: 2px solid #16130e; }
+    {# Brand theming: validated server-side ("#rrggbb" or default). #}
+    .chat-shell { --accent: {{ accent }}; }
+    .chat-shell .chat-head { border-bottom-color: {{ accent }}; }
   </style>
 </head>
 <body>

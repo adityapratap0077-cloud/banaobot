@@ -24,6 +24,7 @@ Hard rules this module follows:
 import os
 import re
 import secrets
+import time
 from datetime import datetime
 from functools import wraps
 
@@ -34,6 +35,7 @@ from flask import (
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import brain
+import sitefetch
 
 bp = Blueprint("dashboard", __name__, template_folder="templates")
 
@@ -189,6 +191,12 @@ def _fmt_ts(value):
         return ""
 
 
+@bp.app_template_filter("themehex")
+def _themehex(value):
+    """Strictly-normalized theme color for templates ("#rrggbb" or "")."""
+    return sitefetch.normalize_theme_hex(value) or ""
+
+
 # ---------------------------------------------------------------------------
 # auth
 # ---------------------------------------------------------------------------
@@ -272,25 +280,79 @@ def index():
 # prompt builder
 # ---------------------------------------------------------------------------
 
+# Light in-memory rate limit for the build-from-website fetcher:
+# 10 fetches per user per hour (per worker process).
+_SITE_FETCH_MAX = 10
+_SITE_FETCH_WINDOW = 3600
+_site_fetch_hits = {}
+
+
+@bp.route("/fetch-site", methods=["POST"])
+@login_required
+def site_fetch():
+    """Build-from-website: JSON {url} -> bot draft.
+
+    Returns {ok:true, name, prompt, theme_color, logo, url} or
+    {ok:false, error}. Never leaks tracebacks — SiteFetchError messages
+    are written for end users.
+    """
+    uid = session["user_id"]
+    now = time.time()
+    hits = [t for t in _site_fetch_hits.get(uid, [])
+            if now - t < _SITE_FETCH_WINDOW]
+    if len(hits) >= _SITE_FETCH_MAX:
+        return _err("Slow down — you've fetched %d websites in the last "
+                    "hour. Try again later." % _SITE_FETCH_MAX, 429)
+    hits.append(now)
+    _site_fetch_hits[uid] = hits
+
+    url = (_json_body().get("url") or "").strip()
+    if not url:
+        return _err("Paste your website address first.")
+    try:
+        html, final_url = sitefetch.fetch_site(url)
+    except sitefetch.SiteFetchError as exc:
+        return _err(str(exc))
+    brief = sitefetch.extract_brief(html, final_url)
+    theme = sitefetch.detect_theme(html, final_url)
+    prompt = sitefetch.build_prompt_from_brief(brief, final_url)
+    return jsonify({
+        "ok": True,
+        "name": brief.get("name") or "My bot",
+        "prompt": prompt,
+        "theme_color": theme.get("primary"),
+        "logo": theme.get("logo"),
+        "url": final_url,
+    })
+
+
 @bp.route("/bots/new", methods=["GET", "POST"])
 @login_required
 def bot_new():
     error = None
     name = ""
     prompt = ""
+    website_url = ""
+    theme_color = ""
     if request.method == "POST":
         name = request.form.get("name", "").strip()
         prompt = request.form.get("prompt", "").strip()
+        website_url = request.form.get("website_url", "").strip()
+        theme_color = request.form.get("theme_color", "").strip()
         if len(prompt) < 20:
             error = ("Your prompt is too short — describe your bot in at "
                      "least a sentence or two so it knows what to do.")
         else:
-            bid = store().create_bot(session["user_id"], name or "My bot",
-                                     prompt)
+            bid = store().create_bot(
+                session["user_id"], name or "My bot", prompt,
+                website_url=website_url or None,
+                theme_color=theme_color or None)
             flash("Your bot is ready! 🎉")
             return redirect(url_for("dashboard.bot_detail", bid=bid))
     return render_template("dash_bot_new.html", error=error,
-                           name=name, prompt=prompt)
+                           name=name, prompt=prompt,
+                           website_url=website_url,
+                           theme_color=theme_color)
 
 
 # ---------------------------------------------------------------------------

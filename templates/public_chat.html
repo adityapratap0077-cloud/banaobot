@@ -7,6 +7,12 @@
   <section class="section" style="padding-top: 48px; border-top: none;">
     <p class="kicker center">A BanaoBot conversation</p>
 
+    {# Brand theming: the bot owner's site color accents the chat shell.
+       `accent` is strictly validated server-side ("#rrggbb" or default). #}
+    <style>
+      .chat-shell { --accent: {{ accent }}; }
+      .chat-shell .chat-head { border-bottom-color: {{ accent }}; }
+    </style>
     <div class="chat-shell">
       <div class="chat-head">
         <div class="chat-avatar" aria-hidden="true">{{ bot.name[0] }}</div>

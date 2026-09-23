@@ -254,6 +254,25 @@ def index():
 # Public share links: /b/<token> — anyone with the link can chat with the bot
 # ---------------------------------------------------------------------------
 
+import re as _re
+
+_THEME_HEX_RE = _re.compile(r"^#[0-9a-fA-F]{6}$")
+DEFAULT_ACCENT = "#e85d26"
+
+
+def theme_accent(bot):
+    """Chat-page accent color for a bot.
+
+    Strictly validated: a stored theme_color of "#rrggbb" (lowercased) or
+    the default orange. Never returns a raw unvalidated string, so it is
+    safe to inject into CSS.
+    """
+    c = ((bot or {}).get("theme_color") or "").strip()
+    if _THEME_HEX_RE.match(c):
+        return "#" + c[1:].lower()
+    return DEFAULT_ACCENT
+
+
 @app.get("/b/<token>")
 def public_chat(token):
     bot = store.get_bot_by_token(token or "")
@@ -262,11 +281,12 @@ def public_chat(token):
             return Response("Unknown bot.", status=404,
                             mimetype="text/plain")
         return render_template("public_404.html"), 404
+    accent = theme_accent(bot)
     if request.args.get("embed") == "1":
         # Iframe-friendly embed: the chat shell only, no site header,
         # footer, or landing chrome.
-        return render_template("public_embed.html", bot=bot)
-    return render_template("public_chat.html", bot=bot)
+        return render_template("public_embed.html", bot=bot, accent=accent)
+    return render_template("public_chat.html", bot=bot, accent=accent)
 
 
 @app.post("/b/<token>/chat")

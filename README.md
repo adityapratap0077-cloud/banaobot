@@ -78,10 +78,51 @@ python3 test_oauth.py      # Google OAuth, new users land on /app/
 python3 test_whatsapp.py    # WhatsApp connector (webhook verify, message
                            # routing, signatures, isolation) + ?embed=1 +
                            # website snippets
+python3 test_sitefetch.py   # build-from-website (fetch, brief extraction,
+                           # theme detection, prompt generation, SSRF guards,
+                           # endpoint, chat theming, column migration)
 python3 test_engine.py      # legacy conversation engine core
 python3 test_platform.py    # multi-tenancy, webhooks
 python3 test_templates.py   # legacy template content
 ```
+
+## Build from your website
+
+On the new-bot page (`/app/bots/new`), **“Build from your website”** sits
+above the manual prompt form. Paste your site's address, hit
+**“Fetch my website →”**, and the app:
+
+1. **Fetches the page** (`POST /app/fetch-site`, login required, 10
+   fetches per user per hour) with a real browser User-Agent, 10s
+   timeout, ~2MB cap, and up to 5 redirects.
+2. **Extracts a brief** — business name (`og:site_name` → `<title>` →
+   hostname), tagline (meta description), about paragraphs, offerings
+   (headings + list items, deduped, ~20), prices (₹/$/€/£ fragments, ~10),
+   hours (~5), contact info (phone/email/address, 5), and a one-line tone
+   guess. Navigation, header, footer, script, and style noise is ignored.
+3. **Detects your theme** — `<meta name="theme-color">` first, else the
+   most frequent non-gray hex color in the site's CSS; also picks up the
+   logo (`og:image` or favicon).
+4. **Drafts the bot** — the name and prompt fields are autofilled with a
+   full prompt in the BanaoBot voice (identity, tone, a facts section,
+   strict never-invent-prices rules). A detected brand color fills the
+   hidden theme field and shows a swatch.
+
+The prompt stays fully editable — the manual path works exactly as
+before. Creating the bot saves `website_url` + `theme_color`, and the
+public chat page (`/b/<token>`, including `?embed=1`) wears the brand
+color on its chat accents (send button, avatar, header rule) instead of
+the default orange.
+
+Safety: only `http(s)` URLs are accepted (embedded credentials rejected);
+every fetch hop is DNS-resolved and rejected when it points at a
+private, loopback, link-local, multicast, or reserved address (SSRF
+guard); errors are honest UI messages, never tracebacks.
+
+Honest limitations: JavaScript-heavy sites (content rendered
+client-side) may yield thin briefs — the generated prompt then says so
+and stays gracefully vague instead of hallucinating. You can always edit
+the prompt by hand afterwards.
 
 ## Embed on your website
 
