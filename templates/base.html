@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}BanaoBot — Describe your bot. It's ready.{% endblock %}</title>
+  <meta name="description" content="Write one prompt, get a live AI bot with a public chat link. No templates, no setup.">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-in">
+      <a class="wordmark" href="/">BanaoBot<span class="dot">.</span></a>
+      <div class="topbar-right">
+        {% block topbar_right %}{% endblock %}
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="wrap">
+      <div class="flashes" role="alert">
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

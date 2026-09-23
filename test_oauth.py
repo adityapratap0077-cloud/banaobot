@@ -5,8 +5,8 @@ Covers:
   - /oauth/google redirects to Google's authorization endpoint when enabled,
     and back to login when disabled.
   - Callback rejects Google errors and unverified emails gracefully.
-  - Callback find-or-create: new user -> onboarding; existing email -> linked;
-    returning Google user -> dashboard.
+  - Callback find-or-create: new user -> /app/ (bot library); existing
+    email -> linked; returning Google user -> dashboard.
   - users.google_sub migration on pre-existing DBs.
 
 Usage: python3 test_oauth.py
@@ -171,15 +171,15 @@ check(r.status_code == 302 and r.headers["Location"].endswith("/app/login"),
 print("== callback: find-or-create flows ==")
 real_fn = dashboard._google_session
 
-# 1. brand-new Google user -> account created -> onboarding
+# 1. brand-new Google user -> account created -> /app/ (bot library)
 install_fake({"sub": "g-111", "email": "New@Example.com",
               "email_verified": True, "name": "New Person"})
 client, store = fresh_client()
 install_fake({"sub": "g-111", "email": "New@Example.com",
               "email_verified": True, "name": "New Person"})
 r = client.get(begin_oauth(client))
-check(r.status_code == 302 and r.headers["Location"].endswith("/app/onboarding"),
-      "new Google user is created and sent to onboarding")
+check(r.status_code == 302 and r.headers["Location"].endswith("/app/"),
+      "new Google user is created and lands on /app/ (bot library)")
 user = store.get_user_by_google_sub("g-111")
 check(user is not None and user["email"] == "new@example.com",
       "new user row stored with google_sub + lowercased email")

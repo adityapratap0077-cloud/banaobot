@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}BanaoBot — Describe your bot. It's ready.{% endblock %}
+
+{% block topbar_right %}
+<a href="/app/login" class="mono" style="font-size:13px; text-decoration:none;">Log in &rarr;</a>
+{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <div class="wrap">
+    <p class="hero-dateline">Issue Nº 01 &mdash; The Prompt Press</p>
+    <h1>Describe your bot.<br><em>It's ready.</em></h1>
+    <p class="hero-sub">
+      Sign in, <strong>write one prompt</strong>, and get a live AI bot with its own
+      <strong>public chat link</strong> &mdash; no templates to pick through, no setup
+      wizards, no code. Your café, your classes, your alter ego: if you can describe
+      it, it can start answering questions tonight.
+    </p>
+    <div class="hero-cta">
+      <a class="btn btn-accent" href="/app/signup">Make my bot &rarr;</a>
+      <a class="btn btn-paper" href="/app/login">Log in</a>
+    </div>
+    <p class="hero-note">Free to start &middot; No card required &middot; Live in about a minute</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <p class="kicker">How it works</p>
+    <h2 style="font-size: clamp(1.9rem, 4.5vw, 2.8rem);">Three steps. That's the whole manual.</h2>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">01</div>
+        <h3>Write a prompt</h3>
+        <p>Tell it who it is, how it should talk, what it knows &mdash; your menu, your prices, your hours, your rules. Plain words, nothing technical.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <h3>Get a live AI bot</h3>
+        <p>Your words become a working chat brain instantly. Preview it right here, tweak the prompt, and watch it learn your voice.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <h3>Share the link</h3>
+        <p>Every bot gets a public chat link. Send it to customers, students, or followers &mdash; they chat, no login needed on their end.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <p class="kicker">Why BanaoBot</p>
+    <div class="two-col">
+      <div>
+        <h2 style="font-size: clamp(1.6rem, 3.5vw, 2.2rem);">One text box,<br>not a control panel.</h2>
+      </div>
+      <div class="prose-narrow">
+        <p class="lede">Most bot builders hand you forty toggles and a flowchart. BanaoBot hands you a blank page. The prompt <em>is</em> the product &mdash; edit one paragraph and your bot's personality, knowledge, and boundaries change with it.</p>
+        <p>Your brain key comes from Google AI Studio and is stored encrypted. Menus, prices, and facts stay exactly as you wrote them; the AI never invents them.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="wrap footer-in">
+    <div>
+      <a class="wordmark" href="/">BanaoBot<span class="dot">.</span></a>
+      <p class="smallprint" style="margin-top:12px;">
+        BanaoBot turns a single written prompt into a live AI chat bot with a shareable public link.
+        Built for shop owners, teachers, and creators who'd rather describe than configure.
+      </p>
+    </div>
+    <nav class="footer-links" aria-label="Footer">
+      <a href="/app/signup">Sign up</a>
+      <a href="/app/login">Log in</a>
+      <a href="/">Home</a>
+    </nav>
+  </div>
+</footer>
+{% endblock %}

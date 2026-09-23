@@ -1,19 +1,24 @@
-"""BanaoBot self-serve dashboard (owner-facing web UI).
+"""BanaoBot dashboard — prompt-first bot builder (owner-facing web UI).
 
 Flask Blueprint named ``bp``. The parent app mounts it as::
 
     import dashboard
     app.register_blueprint(dashboard.bp, url_prefix="/app")
 
+The product: sign in, write ONE prompt describing your bot, get a live AI
+bot with a public chat link. No templates, no onboarding wizards, no menu
+builders.
+
 Hard rules this module follows:
   * NEVER imports server.py or storage.py directly (circular-import risk).
     The Store instance is pulled from ``current_app.config["store"]`` in
     every route.
-  * Every business-scoped route verifies the business belongs to the
-    logged-in user via ``own_business_or_404`` — a 404 (never a 403, never
-    a leak) when it does not.
+  * Every bot-scoped route verifies the bot belongs to the logged-in user
+    via ``own_bot_or_404`` — a 404 (never a 403, never a leak) when it
+    does not.
   * Passwords are hashed with werkzeug; login state lives in Flask's
     signed ``session`` (secret key is set by the parent app).
+  * Raw brain keys are never rendered into templates or logs.
 """
 
 import os
@@ -28,8 +33,7 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-import templates
-import menu_import
+import brain
 
 bp = Blueprint("dashboard", __name__, template_folder="templates")
 
@@ -43,14 +47,6 @@ def store():
     return current_app.config["store"]
 
 
-def _tpl(biz):
-    """(template_id, template dict, resolved tone) for dashboard rendering."""
-    tid = (biz or {}).get("template_id") or "restaurant"
-    tpl = templates.get(tid)
-    tone = ((biz or {}).get("tone") or "").strip() or tpl["default_tone"]
-    return tid, tpl, tone
-
-
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -60,46 +56,16 @@ def login_required(view):
     return wrapped
 
 
-def own_business_or_404(bid):
-    """Return the business dict, or 404 unless it belongs to the user."""
-    biz = store().get_business(bid)
-    if not biz or biz.get("user_id") != session.get("user_id"):
+def own_bot_or_404(bid):
+    """Return the bot dict, or 404 unless it belongs to the logged-in user."""
+    try:
+        bid = int(bid)
+    except (TypeError, ValueError):
         abort(404)
-    return biz
-
-
-def _owner_row(sql, args):
-    """Read-only SELECT on the store's connection for ownership lookups.
-
-    Store has no public category/item/faq -> business getters, so we do a
-    single read-only SELECT here (never a write) purely to enforce
-    multi-tenant ownership before touching nested resources.
-    """
-    row = store()._conn.execute(sql, args).fetchone()
-    return dict(row) if row else None
-
-
-def _category_biz(cid):
-    r = _owner_row("SELECT business_id FROM menu_categories WHERE id=?", (cid,))
-    return r["business_id"] if r else None
-
-
-def _item_biz(iid):
-    r = _owner_row(
-        "SELECT mc.business_id AS business_id FROM menu_items mi "
-        "JOIN menu_categories mc ON mi.category_id = mc.id WHERE mi.id=?",
-        (iid,),
-    )
-    return r["business_id"] if r else None
-
-
-def _faq_biz(fid):
-    r = _owner_row("SELECT business_id FROM faqs WHERE id=?", (fid,))
-    return r["business_id"] if r else None
-
-
-def _demo_mode():
-    return os.environ.get("DEMO_MODE", "").lower() in ("1", "true", "yes")
+    bot = store().get_bot(bid, session.get("user_id"))
+    if bot is None:
+        abort(404)
+    return bot
 
 
 def _json_body():
@@ -210,8 +176,7 @@ def google_callback():
     session["user_id"] = user["id"]
     session["email"] = user["email"]
     if is_new:
-        flash("Welcome to BanaoBot! Let's set up your first business. 🎉")
-        return redirect(url_for("dashboard.onboarding"))
+        flash("Welcome to BanaoBot! Describe your first bot. 🎉")
     return redirect(url_for("dashboard.index"))
 
 
@@ -251,8 +216,8 @@ def signup():
                 session.clear()
                 session["user_id"] = uid
                 session["email"] = email
-                flash("Welcome to BanaoBot! Let's set up your first business. 🎉")
-                return redirect(url_for("dashboard.onboarding"))
+                flash("Welcome to BanaoBot! Describe your first bot. 🎉")
+                return redirect(url_for("dashboard.index"))
     return render_template(
         "dash_signup.html", error=error,
         google_enabled=_google_enabled())
@@ -287,701 +252,131 @@ def logout():
 
 
 # ---------------------------------------------------------------------------
-# dashboard home
+# bot library
 # ---------------------------------------------------------------------------
 
 @bp.route("/")
 @login_required
 def index():
     st = store()
-    businesses = st.list_businesses(session["user_id"])
-    cards = []
-    for b in businesses:
-        alerts = st.list_alerts(b["id"], limit=100)
-        cards.append({
-            "biz": b,
-            "bookings": st.count_bookings(b["id"]),
-            "alerts": sum(1 for a in alerts if not a.get("handled")),
-            "messages": st.count_messages(b["id"]),
-        })
-    return render_template("dash_index.html", cards=cards)
+    bots = st.list_bots(session["user_id"])
+    return render_template(
+        "dash_index.html",
+        bots=bots,
+        has_key=st.has_user_brain_key(session["user_id"]),
+        email=session.get("email"),
+    )
 
 
 # ---------------------------------------------------------------------------
-# onboarding wizard (6 steps: 0 type -> 1 basics -> 2 catalog -> 3 details
-# -> 4 faqs -> 5 welcome)
+# prompt builder
 # ---------------------------------------------------------------------------
 
-@bp.route("/onboarding", methods=["GET", "POST"])
+@bp.route("/bots/new", methods=["GET", "POST"])
 @login_required
-def onboarding():
-    """Step 0 — "what best describes you?": the template picker.
-
-    The legacy POST (name/language/owner_phone/taglines, no template) still
-    creates a restaurant business and continues the wizard — kept working for
-    API/back-compat; the picker form posts to /onboarding/basics instead.
-    """
+def bot_new():
     error = None
+    name = ""
+    prompt = ""
     if request.method == "POST":
         name = request.form.get("name", "").strip()
-        language = request.form.get("language", "en")
-        owner_phone = request.form.get("owner_phone", "").strip()
-        tagline_en = request.form.get("tagline_en", "").strip()
-        tagline_hi = request.form.get("tagline_hi", "").strip()
-        if language not in ("en", "hi"):
-            language = "en"
-        if not name:
-            error = "Business name is required."
-        elif not owner_phone:
-            error = "Owner phone is required — handoff alerts go here."
+        prompt = request.form.get("prompt", "").strip()
+        if len(prompt) < 20:
+            error = ("Your prompt is too short — describe your bot in at "
+                     "least a sentence or two so it knows what to do.")
         else:
-            bid = store().create_business(
-                session["user_id"], name,
-                language=language, owner_phone=owner_phone,
-                tagline_en=tagline_en, tagline_hi=tagline_hi,
-                status="draft",
-            )
-            flash(f"“{name}” created! Now let's build the menu. 🍽️")
-            return redirect(url_for("dashboard.onboarding_menu", bid=bid))
-    return render_template("dash_onboarding_template.html",
-                           templates=store().get_templates(), error=error)
+            bid = store().create_bot(session["user_id"], name or "My bot",
+                                     prompt)
+            flash("Your bot is ready! 🎉")
+            return redirect(url_for("dashboard.bot_detail", bid=bid))
+    return render_template("dash_bot_new.html", error=error,
+                           name=name, prompt=prompt)
 
 
-@bp.route("/onboarding/basics", methods=["GET", "POST"])
+# ---------------------------------------------------------------------------
+# bot page: edit prompt, preview chat, share link, delete
+# ---------------------------------------------------------------------------
+
+@bp.route("/bots/<bid>", methods=["GET", "POST"])
 @login_required
-def onboarding_basics():
-    """Step 1 — the basics: name, language, owner phone, tagline."""
-    tid = request.values.get("template", "restaurant")
-    if tid not in templates.ids():
-        tid = "restaurant"
-    tpl = templates.get(tid)
-    is_personal = (tid == "personal")
-    error = None
+def bot_detail(bid):
+    bot = own_bot_or_404(bid)
+    st = store()
     if request.method == "POST":
         name = request.form.get("name", "").strip()
-        language = request.form.get("language", "en")
-        owner_phone = request.form.get("owner_phone", "").strip()
-        tagline_en = request.form.get("tagline_en", "").strip()
-        tagline_hi = request.form.get("tagline_hi", "").strip()
-        if language not in ("en", "hi"):
-            language = "en"
-        if not name:
-            error = "Bot name is required." if is_personal else "Business name is required."
-        elif not owner_phone and not is_personal:
-            error = "Owner phone is required — handoff alerts go here."
+        prompt = request.form.get("prompt", "").strip()
+        if len(prompt) < 20:
+            flash("Your prompt is too short — give your bot a little more "
+                  "to work with.")
         else:
-            bid = store().create_business(
-                session["user_id"], name, template_id=tid,
-                language=language, owner_phone=owner_phone,
-                tagline_en=tagline_en, tagline_hi=tagline_hi,
-                status="draft",
-            )
-            flash(f"“{name}” created! Now add your {tpl['catalog']['en'].lower()}. {tpl['emoji']}")
-            return redirect(url_for("dashboard.onboarding_menu", bid=bid))
-    return render_template("dash_onboarding_basics.html", error=error,
-                           tpl=tpl, tid=tid, is_personal=is_personal)
-
-
-@bp.route("/onboarding/<int:bid>/menu")
-@login_required
-def onboarding_menu(bid):
-    """Step 2 — catalog builder, then continue to details."""
-    biz = own_business_or_404(bid)
-    tid, tpl, tone = _tpl(biz)
+            st.update_bot(bot["id"], session["user_id"],
+                          name=name or bot["name"], prompt=prompt)
+            flash("Bot updated. ✨")
+        return redirect(url_for("dashboard.bot_detail", bid=bot["id"]))
     return render_template(
-        "dash_onboarding_menu.html", biz=biz, bid=bid, tpl=tpl,
-        continue_url=url_for("dashboard.onboarding_details", bid=bid),
+        "dash_bot_detail.html",
+        bot=bot,
+        has_key=st.has_user_brain_key(session["user_id"]),
+        chat_url=url_for("public_chat", token=bot["share_token"],
+                         _external=True),
+        preview_chat_url=url_for("dashboard.bot_chat", bid=bot["id"]),
     )
 
 
-@bp.route("/onboarding/<int:bid>/details", methods=["GET", "POST"])
+@bp.route("/bots/<bid>/delete", methods=["POST"])
 @login_required
-def onboarding_details(bid):
-    """Step 3 — hours, address, map link."""
-    biz = own_business_or_404(bid)
-    tid, tpl, tone = _tpl(biz)
-    error = None
-    if request.method == "POST":
-        fields = {
-            k: request.form.get(k, "").strip()
-            for k in ("hours_open", "hours_close", "address_en",
-                      "address_hi", "maps_link")
-        }
-        if not fields["hours_open"] or not fields["hours_close"]:
-            error = "Opening and closing hours are required."
-        else:
-            store().update_business(bid, **fields)
-            flash("Details saved! Now a few FAQs for the bot. 💬")
-            return redirect(url_for("dashboard.onboarding_faqs", bid=bid))
-    biz = store().get_business(bid)  # fresh values for the form
-    return render_template("dash_onboarding_details.html",
-                           biz=biz, bid=bid, tpl=tpl, error=error)
+def bot_delete(bid):
+    bot = own_bot_or_404(bid)
+    store().delete_bot(bot["id"], session["user_id"])
+    flash("Bot deleted.")
+    return redirect(url_for("dashboard.index"))
 
 
-def _suggest_faq_key(keywords):
-    """Derive a snake_case faq_key from the first keyword(s)."""
-    slug = re.sub(r"[^a-z0-9]+", "_", (keywords or "").split(",")[0].lower())
-    return slug.strip("_")[:40] or "faq"
-
-
-@bp.route("/onboarding/<int:bid>/faqs", methods=["GET", "POST"])
+@bp.route("/bots/<bid>/chat", methods=["POST"])
 @login_required
-def onboarding_faqs(bid):
-    """Step 4 — show existing FAQs + add form, then continue to welcome."""
-    biz = own_business_or_404(bid)
-    st = store()
-    error = None
-    if request.method == "POST":
-        faq_key = request.form.get("faq_key", "").strip()
-        keywords = request.form.get("keywords", "").strip()
-        answer_en = request.form.get("answer_en", "").strip()
-        answer_hi = request.form.get("answer_hi", "").strip()
-        if not faq_key:
-            faq_key = _suggest_faq_key(keywords)
-        if not answer_en:
-            error = "The English answer is required."
-        else:
-            st.add_faq(bid, faq_key, keywords, answer_en, answer_hi)
-            flash("FAQ added! ✅")
-            return redirect(url_for("dashboard.onboarding_faqs", bid=bid))
-    faqs = st.list_faqs(bid)
-    tid, tpl, tone = _tpl(biz)
-    return render_template("dash_onboarding_faqs.html",
-                           biz=biz, bid=bid, faqs=faqs, tpl=tpl, error=error)
-
-
-@bp.route("/onboarding/<int:bid>/welcome", methods=["GET", "POST"])
-@login_required
-def onboarding_welcome(bid):
-    """Step 5 — welcome messages; Finish flips status to 'active'."""
-    biz = own_business_or_404(bid)
-    tid, tpl, tone = _tpl(biz)
-    # the business was created with the template's default welcome already
-    default_en = (biz["welcome_en"]
-                  or templates.render_welcome(tid, biz["name"],
-                                              biz["tagline_en"], biz["tagline_hi"], "en"))
-    default_hi = (biz["welcome_hi"]
-                  or templates.render_welcome(tid, biz["name"],
-                                              biz["tagline_en"], biz["tagline_hi"], "hi"))
-    if request.method == "POST":
-        welcome_en = request.form.get("welcome_en", "").strip() or default_en
-        welcome_hi = request.form.get("welcome_hi", "").strip() or default_hi
-        store().update_business(bid, welcome_en=welcome_en,
-                                welcome_hi=welcome_hi, status="active")
-        flash(f"“{biz['name']}” is live! Try the preview. 🚀")
-        return redirect(url_for("dashboard.business_home", bid=bid))
-    return render_template("dash_onboarding_welcome.html", biz=biz, bid=bid,
-                           tpl=tpl, default_en=default_en, default_hi=default_hi)
+def bot_chat(bid):
+    """Owner preview chat: JSON {message} -> {ok, reply}."""
+    bot = own_bot_or_404(bid)
+    body = _json_body()
+    message = (body.get("message") or "").strip()
+    if not message:
+        return _err("Type a message first.")
+    key = store().get_user_brain_key(session["user_id"])
+    history = session.get("preview_history_%d" % bot["id"], [])
+    reply = brain.chat_with_prompt(key, bot["name"], bot["prompt"],
+                                   history, message)
+    history = (history + [("user", message[:1500]),
+                          ("model", reply[:1500])])[-16:]
+    session["preview_history_%d" % bot["id"]] = history
+    return jsonify({"ok": True, "reply": reply})
 
 
 # ---------------------------------------------------------------------------
-# business home
+# settings: the owner's brain key
 # ---------------------------------------------------------------------------
 
-@bp.route("/business/<int:bid>")
+@bp.route("/settings", methods=["GET", "POST"])
 @login_required
-def business_home(bid):
+def settings():
     st = store()
-    biz = own_business_or_404(bid)
-    alerts = st.list_alerts(bid, limit=50)
-    tid, tpl, tone = _tpl(biz)
+    uid = session["user_id"]
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        if action == "remove":
+            st.delete_user_brain_key(uid)
+            flash("Brain key removed. Your bots are asleep until you add "
+                  "a new one.")
+        elif action == "save":
+            key = request.form.get("brain_key", "").strip()
+            if len(key) < 10:
+                flash("That doesn't look like a real API key — paste the "
+                      "full key from Google AI Studio.")
+            else:
+                st.save_user_brain_key(uid, key)
+                flash("Brain key saved. Your bots are awake! 🧠")
+        return redirect(url_for("dashboard.settings"))
     return render_template(
-        "dash_business.html",
-        biz=biz, bid=bid, tpl=tpl, tid=tid, tone=tone,
-        bookings=st.count_bookings(bid),
-        bookings_list=st.list_bookings(bid, limit=30),
-        alerts=alerts,
-        unhandled=sum(1 for a in alerts if not a.get("handled")),
-        messages=st.count_messages(bid),
+        "dash_settings.html",
+        has_key=st.has_user_brain_key(uid),
+        email=session.get("email"),
     )
-
-
-# ---------------------------------------------------------------------------
-# menu builder (server-rendered page + JSON API for the vanilla-JS builder)
-# ---------------------------------------------------------------------------
-
-@bp.route("/business/<int:bid>/menu")
-@login_required
-def menu_page(bid):
-    biz = own_business_or_404(bid)
-    tid, tpl, tone = _tpl(biz)
-    return render_template("dash_menu.html", biz=biz, bid=bid,
-                           tpl=tpl, tid=tid, tone=tone)
-
-
-@bp.get("/api/business/<int:bid>/menu")
-@login_required
-def api_menu(bid):
-    own_business_or_404(bid)
-    return jsonify({"ok": True, "categories": store().get_menu(bid)})
-
-
-@bp.post("/api/business/<int:bid>/categories")
-@login_required
-def api_category_create(bid):
-    own_business_or_404(bid)
-    d = _json_body()
-    name_en = (d.get("name_en") or "").strip()
-    if not name_en:
-        return _err("Category name is required.")
-    emoji = (d.get("emoji") or "🍽️").strip() or "🍽️"
-    cid = store().add_category(bid, name_en,
-                               (d.get("name_hi") or "").strip(), emoji)
-    return jsonify({"ok": True, "id": cid})
-
-
-@bp.put("/api/categories/<int:cid>")
-@login_required
-def api_category_update(cid):
-    cb = _category_biz(cid)
-    if cb is None:
-        return _err("Category not found.", 404)
-    own_business_or_404(cb)
-    d = _json_body()
-    fields = {}
-    if "name_en" in d:
-        name_en = (d["name_en"] or "").strip()
-        if not name_en:
-            return _err("Category name cannot be empty.")
-        fields["name_en"] = name_en
-    if "name_hi" in d:
-        fields["name_hi"] = (d["name_hi"] or "").strip()
-    if "emoji" in d:
-        fields["emoji"] = (d["emoji"] or "🍽️").strip() or "🍽️"
-    if not fields:
-        return _err("Nothing to update.")
-    store().update_category(cid, **fields)
-    return jsonify({"ok": True})
-
-
-@bp.delete("/api/categories/<int:cid>")
-@login_required
-def api_category_delete(cid):
-    cb = _category_biz(cid)
-    if cb is None:
-        return _err("Category not found.", 404)
-    own_business_or_404(cb)
-    store().delete_category(cid)  # also removes its items
-    return jsonify({"ok": True})
-
-
-@bp.post("/api/categories/<int:cid>/items")
-@login_required
-def api_item_create(cid):
-    cb = _category_biz(cid)
-    if cb is None:
-        return _err("Category not found.", 404)
-    own_business_or_404(cb)
-    d = _json_body()
-    name_en = (d.get("name_en") or "").strip()
-    if not name_en:
-        return _err("Item name is required.")
-    try:
-        price = int(d.get("price", 0))
-    except (TypeError, ValueError):
-        return _err("Price must be a whole number.")
-    if price < 0:
-        return _err("Price cannot be negative.")
-    veg = d.get("veg", 1)
-    veg = 1 if veg in (1, True, "1", "true", "veg") else 0
-    iid = store().add_item(cid, name_en, (d.get("name_hi") or "").strip(),
-                           price, veg, (d.get("description") or "").strip())
-    return jsonify({"ok": True, "id": iid})
-
-
-@bp.put("/api/items/<int:iid>")
-@login_required
-def api_item_update(iid):
-    ib = _item_biz(iid)
-    if ib is None:
-        return _err("Item not found.", 404)
-    own_business_or_404(ib)
-    d = _json_body()
-    fields = {}
-    if "name_en" in d:
-        name_en = (d["name_en"] or "").strip()
-        if not name_en:
-            return _err("Item name cannot be empty.")
-        fields["name_en"] = name_en
-    if "name_hi" in d:
-        fields["name_hi"] = (d["name_hi"] or "").strip()
-    if "price" in d:
-        try:
-            price = int(d["price"])
-        except (TypeError, ValueError):
-            return _err("Price must be a whole number.")
-        if price < 0:
-            return _err("Price cannot be negative.")
-        fields["price"] = price
-    if "veg" in d:
-        fields["veg"] = 1 if d["veg"] in (1, True, "1", "true", "veg") else 0
-    if "description" in d:
-        fields["description"] = (d["description"] or "").strip()
-    if not fields:
-        return _err("Nothing to update.")
-    store().update_item(iid, **fields)
-    return jsonify({"ok": True})
-
-
-@bp.delete("/api/items/<int:iid>")
-@login_required
-def api_item_delete(iid):
-    ib = _item_biz(iid)
-    if ib is None:
-        return _err("Item not found.", 404)
-    own_business_or_404(ib)
-    store().delete_item(iid)
-    return jsonify({"ok": True})
-
-
-@bp.post("/api/business/<int:bid>/menu/reorder")
-@login_required
-def api_reorder_categories(bid):
-    own_business_or_404(bid)
-    ids = _json_body().get("categories") or []
-    mine = {c["id"] for c in store().get_menu(bid)}
-    if not all(i in mine for i in ids):
-        return _err("Category list does not match this business.")
-    store().reorder_categories(bid, [int(i) for i in ids])
-    return jsonify({"ok": True})
-
-
-@bp.post("/api/categories/<int:cid>/items/reorder")
-@login_required
-def api_reorder_items(cid):
-    cb = _category_biz(cid)
-    if cb is None:
-        return _err("Category not found.", 404)
-    own_business_or_404(cb)
-    ids = _json_body().get("items") or []
-    mine = set()
-    for c in store().get_menu(cb):
-        if c["id"] == cid:
-            mine = {i["id"] for i in c["items"]}
-    if not all(i in mine for i in ids):
-        return _err("Item list does not match this category.")
-    store().reorder_items(cid, [int(i) for i in ids])
-    return jsonify({"ok": True})
-
-
-# ---------------------------------------------------------------------------
-# menu auto-import: paste text / upload file / OCR a menu photo -> review ->
-# one click saves everything as categories + items.
-# ---------------------------------------------------------------------------
-
-_MAX_MENU_UPLOAD = 4 * 1024 * 1024  # 4 MB
-
-
-@bp.route("/business/<int:bid>/menu/import")
-@login_required
-def menu_import_page(bid):
-    biz = own_business_or_404(bid)
-    tid, tpl, tone = _tpl(biz)
-    return render_template("dash_menu_import.html", biz=biz, bid=bid,
-                           tpl=tpl, error=None)
-
-
-@bp.post("/business/<int:bid>/menu/import/parse")
-@login_required
-def menu_import_parse(bid):
-    biz = own_business_or_404(bid)
-    tid, tpl, tone = _tpl(biz)
-
-    def _fail(msg):
-        return render_template("dash_menu_import.html", biz=biz, bid=bid,
-                               tpl=tpl, error=msg)
-
-    text = (request.form.get("menu_text") or "").strip()
-    via_ocr = False
-    f = request.files.get("menu_file")
-    if f and (f.filename or "").strip():
-        data = f.read(_MAX_MENU_UPLOAD + 1)
-        if len(data) > _MAX_MENU_UPLOAD:
-            return _fail("That file is over 4 MB — try a smaller photo.")
-        try:
-            text, via_ocr = menu_import.parse_upload(f.filename, data)
-        except menu_import.OCRError as exc:
-            return _fail(str(exc))
-        text = (text or "").strip()
-    if not text:
-        return _fail("Paste your menu text or upload a menu file first.")
-    groups = menu_import.parse_menu_text(text)
-    if not groups:
-        return _fail("Couldn't find any items with prices in that. "
-                     "Make sure each line has an item name and a price "
-                     "(e.g. “Paneer Tikka — ₹250”), or try a clearer photo.")
-    total = sum(len(g["items"]) for g in groups)
-    return render_template(
-        "dash_menu_import_review.html", biz=biz, bid=bid, tpl=tpl,
-        groups=groups, total=total, via_ocr=via_ocr,
-        show_veg=bool(tpl.get("show_veg")))
-
-
-@bp.post("/business/<int:bid>/menu/import/save")
-@login_required
-def menu_import_save(bid):
-    own_business_or_404(bid)
-    st = store()
-    form = request.form
-    cats_made, items_made = 0, 0
-    for i in range(200):  # group index
-        cat_key = f"cat_{i}"
-        if cat_key not in form:
-            break
-        if form.get(f"skipcat_{i}"):
-            continue
-        cat_name = (form.get(cat_key) or "").strip()
-        if not cat_name:
-            continue
-        emoji = (form.get(f"emoji_{i}") or "🍽️").strip() or "🍽️"
-        cid = st.add_category(bid, cat_name, "", emoji)
-        cats_made += 1
-        for j in range(500):  # item index within the group
-            name_key = f"name_{i}_{j}"
-            if name_key not in form:
-                break
-            if form.get(f"skip_{i}_{j}"):
-                continue
-            name = (form.get(name_key) or "").strip()
-            if not name:
-                continue
-            try:
-                price = int((form.get(f"price_{i}_{j}") or "0").strip() or 0)
-            except (TypeError, ValueError):
-                price = 0
-            price = max(0, price)
-            veg = 0 if form.get(f"nonveg_{i}_{j}") else 1
-            desc = (form.get(f"desc_{i}_{j}") or "").strip()
-            st.add_item(cid, name, "", price, veg, desc)
-            items_made += 1
-    if not items_made:
-        flash("Nothing was saved — every item was skipped.", "error")
-        return redirect(url_for("dashboard.menu_import_page", bid=bid))
-    flash(f"Catalogue built: {items_made} items in {cats_made} "
-          f"categories. 🎉 Review them below.")
-    return redirect(url_for("dashboard.menu_page", bid=bid))
-
-
-# ---------------------------------------------------------------------------
-# FAQs (server-rendered editor)
-# ---------------------------------------------------------------------------
-
-@bp.route("/business/<int:bid>/faqs")
-@login_required
-def faqs_page(bid):
-    biz = own_business_or_404(bid)
-    return render_template("dash_faqs.html", biz=biz, bid=bid,
-                           faqs=store().list_faqs(bid))
-
-
-@bp.post("/business/<int:bid>/faqs/add")
-@login_required
-def faq_add(bid):
-    own_business_or_404(bid)
-    src = request.form.get("src", "manage")  # 'manage' or 'onboarding'
-    faq_key = request.form.get("faq_key", "").strip()
-    keywords = request.form.get("keywords", "").strip()
-    answer_en = request.form.get("answer_en", "").strip()
-    answer_hi = request.form.get("answer_hi", "").strip()
-    if not faq_key:
-        faq_key = _suggest_faq_key(keywords)
-    if not answer_en:
-        flash("The English answer is required.", "error")
-    else:
-        store().add_faq(bid, faq_key, keywords, answer_en, answer_hi)
-        flash("FAQ added! ✅")
-    dest = ("dashboard.onboarding_faqs" if src == "onboarding"
-            else "dashboard.faqs_page")
-    return redirect(url_for(dest, bid=bid))
-
-
-@bp.post("/business/<int:bid>/faqs/<int:fid>/delete")
-@login_required
-def faq_delete(bid, fid):
-    own_business_or_404(bid)
-    if _faq_biz(fid) != bid:
-        abort(404)
-    store().delete_faq(fid)
-    flash("FAQ deleted.")
-    src = request.form.get("src", "manage")
-    dest = ("dashboard.onboarding_faqs" if src == "onboarding"
-            else "dashboard.faqs_page")
-    return redirect(url_for(dest, bid=bid))
-
-
-# ---------------------------------------------------------------------------
-# settings
-# ---------------------------------------------------------------------------
-
-_SETTINGS_FIELDS = (
-    "name", "tagline_en", "tagline_hi", "language",
-    "hours_open", "hours_close", "last_booking",
-    "address_en", "address_hi", "maps_link",
-    "owner_phone", "welcome_en", "welcome_hi",
-    "tone",
-    "label_catalog_en", "label_catalog_hi",
-    "label_book_en", "label_book_hi",
-    "label_unit_en", "label_unit_hi",
-)
-
-
-@bp.route("/business/<int:bid>/settings", methods=["GET", "POST"])
-@login_required
-def settings(bid):
-    biz = own_business_or_404(bid)
-    tid, tpl, tone = _tpl(biz)
-    error = None
-    if request.method == "POST":
-        fields = {k: request.form.get(k, "").strip() for k in _SETTINGS_FIELDS}
-        fields["booking_enabled"] = 1 if request.form.get("booking_enabled") else 0
-        if not fields["name"]:
-            error = "Business name is required."
-        elif fields["language"] not in ("en", "hi"):
-            error = "Language must be en or hi."
-        elif fields["tone"] not in ("", "friendly", "professional", "casual"):
-            error = "Tone must be Friendly, Professional or Casual."
-        else:
-            store().update_business(bid, **fields)
-            flash("Settings saved! ✅")
-            return redirect(url_for("dashboard.settings", bid=bid))
-        biz = {**biz, **fields}  # redisplay what they typed
-    return render_template("dash_settings.html", biz=biz, bid=bid,
-                           tpl=tpl, tid=tid, tone=tone, error=error,
-                           brain_on=bool(biz.get("brain_enabled")
-                                         and biz.get("brain_api_key_enc")),
-                           brain_key_set=bool(biz.get("brain_api_key_enc")))
-
-
-# ---------------------------------------------------------------------------
-# bot brain (optional Gemini layer)
-# ---------------------------------------------------------------------------
-
-@bp.route("/business/<int:bid>/brain", methods=["POST"])
-@login_required
-def brain_settings(bid):
-    biz = own_business_or_404(bid)
-    key = (request.form.get("brain_api_key") or "").strip()
-    if key:
-        store().set_brain_key(bid, key)
-    enabled = 1 if request.form.get("brain_enabled") else 0
-    store().update_business(bid, brain_enabled=enabled)
-    if enabled and not (key or biz.get("brain_api_key_enc")):
-        flash("Brain switched on, but no API key is saved yet — add one below.")
-    else:
-        flash("Brain settings saved! 🧠")
-    return redirect(url_for("dashboard.settings", bid=bid))
-
-
-@bp.route("/business/<int:bid>/brain/remove", methods=["POST"])
-@login_required
-def brain_remove(bid):
-    own_business_or_404(bid)
-    store().clear_brain_key(bid)
-    flash("Brain API key removed — the brain is off, rules still work.")
-    return redirect(url_for("dashboard.settings", bid=bid))
-
-
-@bp.route("/business/<int:bid>/brain/test", methods=["POST"])
-@login_required
-def brain_test(bid):
-    """Try the brain with the saved key; returns JSON {ok, reply|error}."""
-    own_business_or_404(bid)
-    import brain as brain_mod
-    key = store().get_brain_key(bid)
-    if not key:
-        return {"ok": False, "error": "No API key saved yet."}, 400
-    bundle = store().get_business_bundle(bid)
-    prompt = (request.get_json(silent=True) or {}).get("prompt") \
-        or "Hi! Tell me about yourself in one short line."
-    reply, err = brain_mod.chat_with_error(key, bundle, [], prompt,
-                                               bundle.get("language") or "en")
-    if not reply:
-        return {"ok": False,
-                "error": "The API didn't answer — check the key and try again.",
-                "detail": (err or "unknown error")[:300]}, 502
-    return {"ok": True, "reply": reply}
-
-
-# ---------------------------------------------------------------------------
-# live preview (WhatsApp-style chat, zero Meta setup required)
-# ---------------------------------------------------------------------------
-
-@bp.route("/business/<int:bid>/preview")
-@login_required
-def preview(bid):
-    """Phone-style chat UI that talks to the real engine via /demo/message."""
-    biz = own_business_or_404(bid)
-    tid, tpl, tone = _tpl(biz)
-    return render_template("dash_preview.html", biz=biz, bid=bid,
-                           tpl=tpl, tid=tid, tone=tone)
-
-
-# ---------------------------------------------------------------------------
-# WhatsApp connection (Meta Embedded Signup stub + demo simulate)
-# ---------------------------------------------------------------------------
-
-@bp.route("/business/<int:bid>/connect")
-@login_required
-def connect(bid):
-    biz = own_business_or_404(bid)
-    tid, tpl, tone = _tpl(biz)
-    return render_template(
-        "dash_connect.html", biz=biz, bid=bid, tpl=tpl, tid=tid,
-        is_personal=(tid == "personal"),
-        pnid=biz.get("whatsapp_phone_number_id") or "",
-        token_set=bool(biz.get("whatsapp_token_enc")),
-        demo=_demo_mode(),
-    )
-
-
-@bp.post("/business/<int:bid>/connect/exchange")
-@login_required
-def connect_exchange(bid):
-    """Receive the Embedded-Signup `code` and (in production) exchange it
-    for a system-user access token via Meta's Graph API.
-
-    Stub behaviour: with DEMO_MODE=true we accept the stub code and mark
-    the business connected with fake credentials so the whole flow can be
-    clicked through today. Without DEMO_MODE we refuse with a clear
-    message — the owner must finish their Meta app setup first.
-    """
-    own_business_or_404(bid)
-    if not _demo_mode():
-        return jsonify({
-            "ok": False,
-            "error": ("Meta app not configured yet. Create your Meta developer "
-                      "app, fill META_APP_ID / META_CONFIG_ID on this page, "
-                      "and see the checklist for the remaining steps."),
-        }), 400
-    data = _json_body()
-    code = (data.get("code") or "stub").strip() or "stub"
-    # In demo mode we also honour manually pasted credentials so the manual
-    # form on the connect page stores exactly what the owner typed.
-    pnid = (data.get("phone_number_id") or "").strip() or f"demo_pnid_{bid}"
-    token = (data.get("token") or "").strip() or f"demo-token-{code[:12]}"
-    store().set_whatsapp_credentials(bid, pnid, token)
-    return jsonify({"ok": True, "demo": True,
-                    "message": "Demo credentials stored — status is now 'connected'."})
-
-
-@bp.post("/business/<int:bid>/connect/simulate")
-@login_required
-def connect_simulate(bid):
-    """DEMO_MODE only: one-click fake connection for end-to-end testing."""
-    if not _demo_mode():
-        abort(403)
-    own_business_or_404(bid)
-    store().set_whatsapp_credentials(bid, f"demo_pnid_{bid}", "demo-token")
-    flash("Simulated connection complete — status is now “connected”. 🔗")
-    return redirect(url_for("dashboard.connect", bid=bid))
-
-
-# ---------------------------------------------------------------------------
-# Meta prerequisites checklist
-# ---------------------------------------------------------------------------
-
-@bp.route("/business/<int:bid>/checklist")
-@login_required
-def checklist(bid):
-    biz = own_business_or_404(bid)
-    return render_template("dash_checklist.html", biz=biz, bid=bid)

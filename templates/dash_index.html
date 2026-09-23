@@ -1,31 +1,49 @@
-{% extends "dash_base.html" %}
-{% block title %}My businesses{% endblock %}
+{% extends "app_base.html" %}
+
+{% block title %}My bots — BanaoBot{% endblock %}
+
 {% block content %}
-<div class="pagehead">
-  <div>
-    <h1>My businesses</h1>
-    <p>Each business gets its own WhatsApp chatbot, menu and bookings.</p>
-  </div>
-</div>
-{% if cards %}
-<div class="bizgrid">
-  {% for c in cards %}
-  <a class="bizcard" href="{{ url_for('dashboard.business_home', bid=c.biz.id) }}">
-    <span class="badge st-{{ c.biz.status }}">{{ c.biz.status }}</span>
-    <h3>{{ c.biz.name }}</h3>
-    <div class="stats">
-      <div class="stat"><b>{{ c.bookings }}</b><span>bookings</span></div>
-      <div class="stat"><b>{{ c.alerts }}</b><span>handoff alerts</span></div>
-      <div class="stat"><b>{{ c.messages }}</b><span>messages</span></div>
+<div class="wrap">
+  <div class="page-head">
+    <div>
+      <p class="kicker">Dashboard</p>
+      <h1>My bots</h1>
+      <p class="sub">Every bot you've pressed into service.</p>
     </div>
-  </a>
-  {% endfor %}
-  <a class="bizcard newcard" href="{{ url_for('dashboard.onboarding') }}">＋ New business</a>
+    <a class="btn btn-accent" href="/app/bots/new">+ New bot</a>
+  </div>
+
+  {% if not has_key %}
+  <div class="notice" role="alert">
+    <div class="notice-mark">!</div>
+    <div class="notice-body">
+      <strong>Your bots have no brain yet</strong>
+      <p>Bots can't chat until you connect a brain key. It takes a minute, and it's free.</p>
+    </div>
+    <a class="btn btn-small" href="/app/settings">Add brain key &rarr;</a>
+  </div>
+  {% endif %}
+
+  {% if not bots %}
+  <div class="empty-state">
+    <div class="empty-mark">&sect;</div>
+    <h2>No bots yet</h2>
+    <p>Describe your first bot &mdash; its job, its tone, what it knows &mdash; and it'll be answering questions within the minute.</p>
+    <a class="btn btn-accent" href="/app/bots/new">Describe my first bot &rarr;</a>
+  </div>
+  {% else %}
+  <div class="bot-list" role="list">
+    {% for bot in bots %}
+    <a class="bot-row" role="listitem" href="/app/bots/{{ bot.id }}">
+      <span class="bot-name">{{ bot.name }}<span class="arrow">&rarr;</span></span>
+      <span class="bot-meta">
+        <span>{{ bot.created_at }}</span>
+        <span class="token-chip" title="Share token">{{ bot.share_token[:8] }}&hellip;</span>
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+  <div class="list-foot">{{ bots|length }} bot{{ 's' if bots|length != 1 }} on the roster</div>
+  {% endif %}
 </div>
-{% else %}
-<div class="card empty">
-  <p><b>No businesses yet.</b><br>Create your first one and BanaoBot will build its WhatsApp chatbot.</p>
-  <a class="btn" href="{{ url_for('dashboard.onboarding') }}">＋ New business</a>
-</div>
-{% endif %}
 {% endblock %}

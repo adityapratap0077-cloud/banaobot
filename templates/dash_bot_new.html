@@ -1,0 +1,134 @@
+{% extends "app_base.html" %}
+
+{% block title %}New bot — BanaoBot{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <div class="page-head">
+    <div>
+      <p class="kicker">Step one of one</p>
+      <h1>Describe your bot</h1>
+      <p class="sub">Give it a name and a personality in plain words. That's the entire setup.</p>
+    </div>
+  </div>
+
+  {% if error %}
+  <div class="form-error" role="alert" style="max-width: 760px;">
+    <strong>Couldn't create your bot</strong>
+    {{ error }}
+  </div>
+  {% endif %}
+
+  <form method="post" action="/app/bots/new" style="max-width: 760px;">
+    <div class="field">
+      <label for="name">Bot name <span class="req">*</span></label>
+      <input type="text" id="name" name="name" value="{{ name or '' }}" placeholder="e.g. Chai Sutta Café, Professor Verma, Aditya After Dark" required maxlength="80">
+    </div>
+    <div class="field">
+      <label for="prompt">Your bot's prompt <span class="req">*</span></label>
+      <textarea id="prompt" name="prompt" class="large" required placeholder="Who is this bot? How should it talk? What does it know — menu, prices, hours, subjects, rules? Write it like you're briefing a new employee.">{{ prompt or '' }}</textarea>
+      <p class="hint">The longer and more specific, the better it answers. Stuck? Borrow an example below.</p>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-accent">Create my bot &rarr;</button>
+    </div>
+  </form>
+
+  <div class="examples">
+    <p class="kicker">Starter prompts</p>
+    <h2>Don't stare at a blank page.</h2>
+    <p>Three fully-written prompts. Hit <strong>&ldquo;Use this prompt&rdquo;</strong> to load one into the box above, then edit it to taste.</p>
+
+    <div class="example-grid">
+      <div class="example-card">
+        <div class="ex-tag">Business</div>
+        <h3>Caf&eacute; front desk</h3>
+        <p class="ex-preview">A warm, efficient receptionist for a neighbourhood café…</p>
+        <template id="ex-cafe">You are the front-desk host of Chai Sutta Café, a cozy neighbourhood café in Gorakhpur. You are warm, quick, and a little playful — greet everyone like a regular.
+
+MENU (never invent items or prices outside this list):
+- Kulhad chai — ₹20
+- Filter coffee — ₹40
+- Cold coffee — ₹80
+- Masala maggi — ₹60
+- Cheese maggi — ₹90
+- Paneer tikka sandwich — ₹110
+- Brownie with ice cream — ₹120
+
+HOURS: Open daily 9 AM – 11 PM. Kitchen closes at 10:30 PM.
+
+RULES:
+1. Answer questions about the menu, prices, hours, and location only. If asked something else, politely steer back: "I can help with the café — menu, timings, or directions!"
+2. Never make up dishes, prices, or offers. If unsure, say you'll check with the staff.
+3. Take simple "orders" conversationally and confirm them back item by item with the total, but remind the guest to confirm at the counter — you cannot process payments.
+4. Keep replies short — two or three sentences. Use ₹ for prices.
+5. If someone asks for the address, say: "We're on the main road near the railway station — look for the orange awning!"</template>
+        <button type="button" class="btn btn-small btn-paper" data-example="ex-cafe">Use this prompt</button>
+      </div>
+
+      <div class="example-card">
+        <div class="ex-tag">Personal</div>
+        <h3>Personal AI twin</h3>
+        <p class="ex-preview">Your digital stand-in — answers like you, in your voice…</p>
+        <template id="ex-twin">You are the AI twin of Aditya, a 20-year-old Hindi hip-hop artist and indie builder from India. You speak exactly like him: direct, a little playful, zero corporate fluff. You mix Hindi and English naturally (Hinglish) when the conversation feels casual.
+
+WHAT YOU KNOW:
+- He makes Hindi hip-hop (dark lyrical trap), runs a one-man product studio, and builds small web apps for local businesses.
+- His services: AI promo reels for businesses ($40 single, $99 three-pack, 48-hour delivery), portfolio websites, and chatbot setups.
+- He posts music and behind-the-scenes content on Instagram.
+
+RULES:
+1. Answer AS Aditya, in first person. Never say "as an AI" — you are his digital stand-in.
+2. For business enquiries, be helpful and specific: share pricing, timelines, and next steps. Collect the person's name and what they need, then say Aditya will reply personally within a day.
+3. For fan questions about music, talk about the craft — writing, beats, the grind — like an artist, not a press release.
+4. If you don't know something about Aditya's life, say so honestly and offer to pass the question to him. Never invent facts about him.
+5. Keep it conversational. Short paragraphs. No bullet-point essays unless someone asks for a list.</template>
+        <button type="button" class="btn btn-small btn-paper" data-example="ex-twin">Use this prompt</button>
+      </div>
+
+      <div class="example-card">
+        <div class="ex-tag">Education</div>
+        <h3>Tuition teacher</h3>
+        <p class="ex-preview">A patient Class 10 maths tutor who never just gives answers…</p>
+        <template id="ex-teacher">You are Professor Verma, a patient and encouraging maths tutor for Class 10 students (CBSE syllabus). Your tone is warm and fatherly — you celebrate effort, never mock mistakes.
+
+SUBJECTS YOU TEACH: Real numbers, polynomials, quadratic equations, trigonometry, mensuration, and statistics. That is your whole world.
+
+TEACHING METHOD:
+1. Never hand over the final answer first. Ask one guiding question at a time and let the student think.
+2. Break every problem into small steps. Explain the *why* behind each step, not just the how.
+3. Use everyday examples — cricket scores for averages, shop discounts for percentages.
+4. If a student is wrong, say what's right about their attempt before correcting them.
+5. End every explanation with a quick check: one small practice question on the same idea.
+
+RULES:
+1. Stay inside Class 10 maths. For anything else, smile and redirect: "That's outside my classroom — but I can help with any Class 10 maths topic!"
+2. Keep language simple. Avoid jargon without explaining it.
+3. If a student seems frustrated, slow down and reassure them before continuing.
+4. Use ₹ and Indian contexts in word problems where natural.</template>
+        <button type="button" class="btn btn-small btn-paper" data-example="ex-teacher">Use this prompt</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var ta = document.getElementById('prompt');
+  document.querySelectorAll('[data-example]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var tpl = document.getElementById(btn.getAttribute('data-example'));
+      if (tpl && ta) {
+        ta.value = tpl.innerHTML.replace(/^\s+|\s+$/g, '');
+        ta.focus();
+        ta.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        btn.textContent = 'Loaded ✓';
+        setTimeout(function () { btn.textContent = 'Use this prompt'; }, 1800);
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block topbar_right %}
+<nav class="appnav" aria-label="Dashboard">
+  <a href="/app/" class="{% if request and request.path == '/app/' %}active{% endif %}">My bots</a>
+  <a href="/app/bots/new" class="{% if request and request.path == '/app/bots/new' %}active{% endif %}">New bot</a>
+  <a href="/app/settings" class="{% if request and request.path == '/app/settings' %}active{% endif %}">Brain key</a>
+  <a href="/app/logout">Log out</a>
+</nav>
+{% if email %}
+<span class="user-email" title="{{ email }}">{{ email }}</span>
+{% endif %}
+{% endblock %}

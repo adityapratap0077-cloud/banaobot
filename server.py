@@ -32,9 +32,10 @@ import json
 import os
 import urllib.request
 
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, render_template
 
 import engine
+import brain
 from storage import Store
 
 app = Flask(__name__)
@@ -237,7 +238,35 @@ def demo_message():
 
 @app.get("/")
 def index():
-    return send_from_directory(BASE_DIR, "demo.html")
+    return render_template("landing.html")
+
+
+# ---------------------------------------------------------------------------
+# Public share links: /b/<token> — anyone with the link can chat with the bot
+# ---------------------------------------------------------------------------
+
+@app.get("/b/<token>")
+def public_chat(token):
+    bot = store.get_bot_by_token(token or "")
+    if bot is None:
+        return render_template("public_404.html"), 404
+    return render_template("public_chat.html", bot=bot)
+
+
+@app.post("/b/<token>/chat")
+def public_chat_message(token):
+    """Visitor chat: JSON {message} -> {ok, reply}. No login needed."""
+    bot = store.get_bot_by_token(token or "")
+    if bot is None:
+        return jsonify({"ok": False, "error": "unknown bot"}), 404
+    data = request.get_json(silent=True)
+    message = ((data or {}).get("message") or "").strip()
+    if not message:
+        return jsonify({"ok": False, "error": "Type a message first."}), 400
+    key = store.get_user_brain_key(bot["user_id"])
+    reply = brain.chat_with_prompt(key, bot["name"], bot["prompt"], [],
+                                   message)
+    return jsonify({"ok": True, "reply": reply})
 
 
 # ---------------------------------------------------------------------------

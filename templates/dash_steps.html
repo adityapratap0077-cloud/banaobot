@@ -1,9 +1,0 @@
-{# Onboarding step indicator. Expects `step` (0-5) in context. #}
-<div class="steps">
-  <span class="{{ 'done' if step > 0 else 'cur' }}">0 · Type</span>
-  <span class="{{ 'done' if step > 1 else 'cur' if step == 1 else '' }}">1 · Basics</span>
-  <span class="{{ 'done' if step > 2 else 'cur' if step == 2 else '' }}">2 · Catalog</span>
-  <span class="{{ 'done' if step > 3 else 'cur' if step == 3 else '' }}">3 · Details</span>
-  <span class="{{ 'done' if step > 4 else 'cur' if step == 4 else '' }}">4 · FAQs</span>
-  <span class="{{ 'cur' if step == 5 else '' }}">5 · Welcome</span>
-</div>

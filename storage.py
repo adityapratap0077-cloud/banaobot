@@ -49,6 +49,20 @@ CREATE TABLE IF NOT EXISTS users (
     google_sub    TEXT UNIQUE,
     created_at    INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS user_brain_keys (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    key_enc    TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS bots (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    prompt     TEXT NOT NULL,
+    share_token TEXT UNIQUE NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bots_user ON bots(user_id, created_at);
 CREATE TABLE IF NOT EXISTS businesses (
     id                     INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id                INTEGER NOT NULL DEFAULT 0,
@@ -595,6 +609,131 @@ class Store:
         with self._cur() as cur:
             row = cur.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         return dict(row) if row else None
+
+    # -- prompt-first bots -------------------------------------------------
+    # One encrypted Gemini key per owner (shared by all their bots), and one
+    # row per bot: name + the owner's prompt + an unguessable public share
+    # token. All reads are owner-scoped — a different user never sees
+    # another owner's bot.
+
+    def save_user_brain_key(self, user_id, key_plain):
+        """Store/replace the owner's encrypted Gemini key."""
+        enc = encrypt_token((key_plain or "").strip())
+        now = int(time.time())
+        with self._cur() as cur:
+            cur.execute(
+                "INSERT INTO user_brain_keys (user_id, key_enc, updated_at)"
+                " VALUES (?,?,?)"
+                " ON CONFLICT(user_id) DO UPDATE SET key_enc=excluded.key_enc,"
+                " updated_at=excluded.updated_at",
+                (user_id, enc, now),
+            )
+        return True
+
+    def get_user_brain_key(self, user_id):
+        """Return the decrypted key, or "" when the owner has none."""
+        with self._cur() as cur:
+            row = cur.execute(
+                "SELECT key_enc FROM user_brain_keys WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return ""
+        try:
+            return decrypt_token(row["key_enc"]) or ""
+        except Exception:
+            return ""  # fail closed: corrupt ciphertext reads as no key
+
+    def delete_user_brain_key(self, user_id):
+        with self._cur() as cur:
+            cur.execute(
+                "DELETE FROM user_brain_keys WHERE user_id=?", (user_id,))
+            return cur.rowcount > 0
+
+    def has_user_brain_key(self, user_id):
+        return bool(self.get_user_brain_key(user_id))
+
+    @staticmethod
+    def _new_share_token():
+        import secrets as _secrets
+        return _secrets.token_urlsafe(24)
+
+    def create_bot(self, user_id, name, prompt):
+        """Create a bot for this owner. Returns the bot id."""
+        name = (name or "").strip() or "My bot"
+        token = self._new_share_token()
+        with self._cur() as cur:
+            for _ in range(5):  # astronomically unlikely to loop
+                try:
+                    cur.execute(
+                        "INSERT INTO bots (user_id, name, prompt, share_token,"
+                        " created_at) VALUES (?,?,?,?,?)",
+                        (user_id, name, (prompt or "").strip(),
+                         token, int(time.time())),
+                    )
+                    return cur.lastrowid
+                except sqlite3.IntegrityError:
+                    token = self._new_share_token()
+            raise RuntimeError("could not mint a unique bot share token")
+
+    def list_bots(self, user_id):
+        with self._cur() as cur:
+            rows = cur.execute(
+                "SELECT * FROM bots WHERE user_id=? ORDER BY created_at DESC,"
+                " id DESC",
+                (user_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_bot(self, bot_id, user_id=None):
+        """Fetch a bot; when user_id is given the bot must belong to them."""
+        with self._cur() as cur:
+            row = cur.execute(
+                "SELECT * FROM bots WHERE id=?", (bot_id,)).fetchone()
+        if not row:
+            return None
+        bot = dict(row)
+        if user_id is not None and bot["user_id"] != user_id:
+            return None
+        return bot
+
+    def get_bot_by_token(self, token):
+        """Public lookup: anyone with the unguessable token can chat."""
+        with self._cur() as cur:
+            row = cur.execute(
+                "SELECT * FROM bots WHERE share_token=?", (token or "",)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def update_bot(self, bot_id, user_id, name=None, prompt=None):
+        """Owner-scoped update. Returns True when the bot exists and the
+        owner matches."""
+        bot = self.get_bot(bot_id, user_id)
+        if bot is None:
+            return False
+        fields = {}
+        if name is not None:
+            fields["name"] = (name or "").strip() or bot["name"]
+        if prompt is not None:
+            fields["prompt"] = (prompt or "").strip()
+        if not fields:
+            return True
+        sets = ", ".join(f"{k}=?" for k in fields)
+        with self._cur() as cur:
+            cur.execute(
+                f"UPDATE bots SET {sets} WHERE id=? AND user_id=?",
+                (*fields.values(), bot_id, user_id),
+            )
+            return cur.rowcount > 0
+
+    def delete_bot(self, bot_id, user_id):
+        """Owner-scoped delete. Returns True when a row was removed."""
+        with self._cur() as cur:
+            cur.execute(
+                "DELETE FROM bots WHERE id=? AND user_id=?",
+                (bot_id, user_id),
+            )
+            return cur.rowcount > 0
 
     # -- businesses ------------------------------------------------------
     _BIZ_FIELDS = (

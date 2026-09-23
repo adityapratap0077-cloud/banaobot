@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}{{ bot.name }} — chat — BanaoBot{% endblock %}
+
+{% block content %}
+<div class="wrap" style="max-width: 720px;">
+  <section class="section" style="padding-top: 48px; border-top: none;">
+    <p class="kicker center">A BanaoBot conversation</p>
+
+    <div class="chat-shell">
+      <div class="chat-head">
+        <div class="chat-avatar" aria-hidden="true">{{ bot.name[0] }}</div>
+        <div>
+          <div class="chat-title">{{ bot.name }}</div>
+          <div class="chat-sub">Powered by BanaoBot</div>
+        </div>
+        <span class="chat-status">Online</span>
+      </div>
+
+      <div class="chat-log tall" id="chat-log" aria-live="polite"></div>
+
+      <form class="chat-form" id="chat-form" autocomplete="off">
+        <input type="text" id="chat-input" placeholder="Write a message&hellip;" aria-label="Message" maxlength="2000">
+        <button type="submit" class="btn btn-accent">Send</button>
+      </form>
+    </div>
+
+    <p class="smallprint center" style="margin: 24px auto 0;">
+      Made with <a href="/">BanaoBot</a> &mdash; describe a bot, get a live chat link.
+    </p>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var log = document.getElementById('chat-log');
+  var form = document.getElementById('chat-form');
+  var input = document.getElementById('chat-input');
+  var botName = {{ bot.name|tojson }};
+  var chatUrl = {{ url_for('public_chat_message', token=bot.share_token)|tojson }};
+
+  function scrollDown() { log.scrollTop = log.scrollHeight; }
+
+  function addMsg(text, who) {
+    var div = document.createElement('div');
+    div.className = 'msg msg-' + who;
+    var meta = document.createElement('span');
+    meta.className = 'msg-meta';
+    meta.textContent = who === 'user' ? 'You' : botName;
+    div.appendChild(meta);
+    // Preserve line breaks in bot replies
+    var parts = String(text).split('\n');
+    parts.forEach(function (part, i) {
+      if (i > 0) div.appendChild(document.createElement('br'));
+      div.appendChild(document.createTextNode(part));
+    });
+    log.appendChild(div);
+    scrollDown();
+  }
+
+  function addTyping() {
+    var div = document.createElement('div');
+    div.className = 'typing';
+    div.setAttribute('aria-label', botName + ' is typing');
+    div.innerHTML = '<span></span><span></span><span></span>';
+    log.appendChild(div);
+    scrollDown();
+    return div;
+  }
+
+  addMsg('Hi! Ask me anything — I\u2019m here to help.', 'bot');
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var text = input.value.trim();
+    if (!text) return;
+    addMsg(text, 'user');
+    input.value = '';
+    input.focus();
+    var typing = addTyping();
+    fetch(chatUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text })
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error('bad status');
+        return res.json();
+      })
+      .then(function (data) {
+        typing.remove();
+        addMsg(data.reply || '(no reply)', 'bot');
+      })
+      .catch(function () {
+        typing.remove();
+        addMsg('Something went wrong. Please try again in a moment.', 'bot msg-error');
+      });
+  });
+})();
+</script>
+{% endblock %}

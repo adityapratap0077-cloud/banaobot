@@ -1,0 +1,185 @@
+{% extends "app_base.html" %}
+
+{% block title %}{{ bot.name }} — BanaoBot{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <div class="page-head">
+    <div>
+      <p class="kicker">Bot file Nº {{ bot.id }}</p>
+      <h1>{{ bot.name }}</h1>
+      <p class="sub">Prompt, share link, and a live preview &mdash; everything in one place.</p>
+    </div>
+    <a class="btn btn-paper" href="/app/">&larr; All bots</a>
+  </div>
+
+  <!-- Prompt editor -->
+  <section class="panel" aria-label="Edit bot">
+    <div class="panel-head">
+      <h2><span class="num">01</span> The prompt</h2>
+    </div>
+    <div class="panel-body">
+      <p class="panel-note">This paragraph <em>is</em> your bot. Rewrite it and the personality, knowledge, and rules change with it. Hit save, then test below.</p>
+      <form method="post" action="/app/bots/{{ bot.id }}">
+        <div class="field">
+          <label for="name">Bot name</label>
+          <input type="text" id="name" name="name" value="{{ bot.name }}" maxlength="80" required>
+        </div>
+        <div class="field">
+          <label for="prompt">Your bot's prompt</label>
+          <textarea id="prompt" name="prompt" class="large" required>{{ bot.prompt }}</textarea>
+        </div>
+        <div class="form-actions" style="margin-top: 20px;">
+          <button type="submit" class="btn btn-accent">Save changes</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- Share -->
+  <section class="panel" aria-label="Share bot">
+    <div class="panel-head">
+      <h2><span class="num">02</span> Share</h2>
+    </div>
+    <div class="panel-body">
+      <p class="panel-note">Anyone with this link can chat with <strong>{{ bot.name }}</strong>. No login needed on their end.</p>
+      <div class="share-box">
+        <span class="share-label">&#9986; Public chat link &mdash; cut along the dotted line</span>
+        <input type="text" id="share-url" class="share-url" value="{{ chat_url }}" readonly onclick="this.select()" aria-label="Public chat link">
+        <button type="button" id="copy-link" class="btn btn-small">Copy</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Preview chat -->
+  <section class="panel" aria-label="Preview chat">
+    <div class="panel-head">
+      <h2><span class="num">03</span> Preview chat</h2>
+    </div>
+    {% if has_key %}
+    <div class="panel-body tight">
+      <div class="chat-shell" style="border:none; box-shadow:none; border-radius:0;">
+        <div class="chat-log tall" id="preview-log" aria-live="polite"></div>
+        <form class="chat-form" id="preview-form" autocomplete="off">
+          <input type="text" id="preview-input" placeholder="Ask {{ bot.name }} something&hellip;" aria-label="Message">
+          <button type="submit" class="btn btn-accent">Send</button>
+        </form>
+      </div>
+    </div>
+    {% else %}
+    <div class="panel-body">
+      <div class="notice" style="margin-bottom: 0;">
+        <div class="notice-mark">!</div>
+        <div class="notice-body">
+          <strong>Preview needs a brain key</strong>
+          <p>Connect your free Google AI Studio key and this preview comes alive.</p>
+        </div>
+        <a class="btn btn-small" href="/app/settings">Add brain key &rarr;</a>
+      </div>
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- Danger zone -->
+  <section class="panel danger" aria-label="Danger zone">
+    <div class="panel-head">
+      <h2><span class="num">!!</span> Danger zone</h2>
+    </div>
+    <div class="panel-body">
+      <p>Deleting <strong>{{ bot.name }}</strong> is permanent &mdash; the prompt, the share link, everything. There's no undo, so be sure.</p>
+      <form method="post" action="/app/bots/{{ bot.id }}/delete"
+            onsubmit="return confirm('Delete {{ bot.name }} permanently? This cannot be undone.');">
+        <button type="submit" class="btn btn-danger">Delete this bot</button>
+      </form>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  // Copy share link
+  var copyBtn = document.getElementById('copy-link');
+  var shareInput = document.getElementById('share-url');
+  if (copyBtn && shareInput) {
+    copyBtn.addEventListener('click', function () {
+      shareInput.select();
+      var done = function () {
+        copyBtn.textContent = 'Copied ✓';
+        setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1800);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(shareInput.value).then(done, function () {
+          document.execCommand('copy');
+          done();
+        });
+      } else {
+        document.execCommand('copy');
+        done();
+      }
+    });
+  }
+
+  // Preview chat
+  var form = document.getElementById('preview-form');
+  if (!form) return;
+  var log = document.getElementById('preview-log');
+  var input = document.getElementById('preview-input');
+
+  function scrollDown() { log.scrollTop = log.scrollHeight; }
+
+  function addMsg(text, who) {
+    var div = document.createElement('div');
+    div.className = 'msg msg-' + who;
+    var meta = document.createElement('span');
+    meta.className = 'msg-meta';
+    meta.textContent = who === 'user' ? 'You' : {{ bot.name|tojson }};
+    div.appendChild(meta);
+    var p = document.createElement('p');
+    p.textContent = text;
+    div.appendChild(p);
+    log.appendChild(div);
+    scrollDown();
+    return div;
+  }
+
+  function addTyping() {
+    var div = document.createElement('div');
+    div.className = 'typing';
+    div.setAttribute('aria-label', 'Bot is typing');
+    div.innerHTML = '<span></span><span></span><span></span>';
+    log.appendChild(div);
+    scrollDown();
+    return div;
+  }
+
+  // Opening line so the preview never starts empty
+  addMsg('This is a live preview. Ask me anything — if I sound off, tweak the prompt above and try again.', 'bot');
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var text = input.value.trim();
+    if (!text) return;
+    addMsg(text, 'user');
+    input.value = '';
+    input.focus();
+    var typing = addTyping();
+    fetch({{ preview_chat_url|tojson }}, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text })
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        typing.remove();
+        addMsg(data.reply || '(no reply)', 'bot');
+      })
+      .catch(function () {
+        typing.remove();
+        addMsg('Something went wrong talking to the brain. Check your brain key, then try again.', 'bot msg-error');
+      });
+  });
+})();
+</script>
+{% endblock %}

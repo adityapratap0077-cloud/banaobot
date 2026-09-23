@@ -22,6 +22,7 @@ import json
 import os
 import sys
 import tempfile
+import urllib.error
 from datetime import date
 from unittest import mock
 
@@ -265,5 +266,90 @@ with mock.patch.object(engine._brain, "chat",
         business=plain, today=TODAY)
     txt = " ".join(bodies(replies)).lower()
     check("didn't quite get that" in txt, "classic fallback when brain off")
+
+# ---------------------------------------------------------------------------
+# (i) build_bot_system_prompt(): prompt-first bots
+# ---------------------------------------------------------------------------
+print("== (i) prompt-first system prompt ==")
+BOT_NAME = "Chaiwala Bot"
+OWNER_PROMPT = ("You are a witty tutor who explains cricket in simple words "
+                "and never talks about politics.")
+sys_prompt = brain.build_bot_system_prompt(BOT_NAME, OWNER_PROMPT)
+check(BOT_NAME in sys_prompt, "bot system prompt names the bot")
+check(OWNER_PROMPT in sys_prompt,
+      "bot system prompt embeds the owner's prompt text")
+check("never reveal" in sys_prompt.lower()
+      and "prompt" in sys_prompt.lower(),
+      "bot system prompt forbids revealing the prompt")
+
+# ---------------------------------------------------------------------------
+# (j) chat_with_prompt(): prompt-first chat (mocked HTTP)
+# ---------------------------------------------------------------------------
+print("== (j) chat_with_prompt ==")
+
+captured2 = {}
+
+
+def fake_prompt_urlopen(req, timeout=None):
+    captured2["url"] = req.full_url
+    captured2["payload"] = json.loads(req.data.decode())
+    return FakeResp({"candidates": [{"content": {"parts": [
+        {"text": "Hello! I am Chaiwala Bot, at your service."}]}}]})
+
+
+with mock.patch.object(brain.urllib.request, "urlopen",
+                       fake_prompt_urlopen):
+    reply = brain.chat_with_prompt("secret-key", BOT_NAME, OWNER_PROMPT,
+                                   [], "namaste")
+
+check(reply and "Chaiwala Bot" in reply,
+      "chat_with_prompt returns the model text")
+sys_inst = captured2["payload"]["system_instruction"]["parts"][0]["text"]
+check(OWNER_PROMPT in sys_inst and BOT_NAME in sys_inst,
+      "request body system_instruction carries the owner prompt + bot name")
+
+
+def fake_404_then_ok(req, timeout=None):
+    fake_404_then_ok.calls.append(req.full_url)
+    if len(fake_404_then_ok.calls) == 1:
+        raise urllib.error.HTTPError(
+            req.full_url, 404, "Not Found", {},
+            io.BytesIO(b'{"error":{"message":"model not found"}}'))
+    return FakeResp({"candidates": [{"content": {"parts": [
+        {"text": "second model answering"}]}}]})
+
+
+fake_404_then_ok.calls = []
+with mock.patch.object(brain.urllib.request, "urlopen", fake_404_then_ok):
+    reply = brain.chat_with_prompt("secret-key", BOT_NAME, OWNER_PROMPT,
+                                   [], "hello again")
+check(reply == "second model answering"
+      and len(fake_404_then_ok.calls) == 2
+      and "gemini-2.5-flash" in fake_404_then_ok.calls[1],
+      "HTTP 404 on the first model -> retries the second model")
+
+
+def no_http_allowed(req, timeout=None):
+    raise AssertionError("no HTTP call may happen without a key")
+
+
+with mock.patch.object(brain.urllib.request, "urlopen", no_http_allowed):
+    reply = brain.chat_with_prompt("", BOT_NAME, OWNER_PROMPT, [], "hi")
+check(reply is not None and "not awake" in reply.lower(),
+      "empty key -> honest 'not awake' message, no HTTP call")
+
+
+def dns_down(req, timeout=None):
+    raise urllib.error.URLError("dns down")
+
+
+with mock.patch.object(brain.urllib.request, "urlopen", dns_down):
+    reply = brain.chat_with_prompt("k", BOT_NAME, OWNER_PROMPT, [], "hi")
+check(reply is not None and "brain" in reply.lower(),
+      "URLError -> honest message mentioning the brain (never None)")
+
+check(brain.chat_with_prompt("k", BOT_NAME, OWNER_PROMPT, [], "   ")
+      is not None,
+      "chat_with_prompt never returns None (blank text -> honest nudge)")
 
 print(f"\n{PASS} brain checks passed.")
