@@ -49,6 +49,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -443,8 +444,43 @@ def _exec_script(conn, script):
 # XOR-with-secret + base64 (obfuscation, NOT real encryption).
 # PRODUCTION NOTE: use a proper secret manager / KMS for these tokens.
 
+def _dev_mode() -> bool:
+    """Local dev only: BANAOBOT_DEV=1 or FLASK_DEBUG=1. Never set in production."""
+    return os.environ.get("BANAOBOT_DEV") == "1" or os.environ.get("FLASK_DEBUG") == "1"
+
+
+def _resolve_token_secret() -> bytes:
+    """Resolve the token-encryption secret, failing CLOSED on misconfiguration.
+
+    SECURITY: there is deliberately NO silent fallback to a hardcoded
+    constant. BANAOBOT_SECRET is generated for production by render.yaml
+    (generateValue: true), so a raise here only fires when someone deploys
+    or runs without configuring the secret at all.
+    """
+    secret = os.environ.get("BANAOBOT_SECRET")
+    if secret:
+        return secret.encode()
+    if _dev_mode():
+        sys.stderr.write(
+            "WARNING: BANAOBOT_SECRET is not set — using an insecure DEV-ONLY "
+            "token key. NEVER use this in production.\n"
+        )
+        return b"banaobot-dev-secret"
+    raise RuntimeError(
+        "BANAOBOT_SECRET is not set. Refusing to encrypt/decrypt WhatsApp and "
+        "Gemini tokens with an insecure fallback. Set BANAOBOT_SECRET "
+        "(render.yaml generates it for the Render deploy), or export "
+        "BANAOBOT_DEV=1 for local development."
+    )
+
+
+# Resolved once at startup (module import) so a misconfigured process fails
+# fast instead of silently encrypting with a public fallback key.
+_TOKEN_SECRET = _resolve_token_secret()
+
+
 def _secret() -> bytes:
-    return os.environ.get("BANAOBOT_SECRET", "banaobot-dev-secret").encode()
+    return _TOKEN_SECRET
 
 
 def encrypt_token(plaintext: str) -> str:
