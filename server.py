@@ -78,15 +78,6 @@ try:
 except Exception as exc:  # pragma: no cover - surfaced loudly in logs
     print(f"[banaobot] WARNING: whatsapp connector not loaded: {exc}")
 
-# TEMPORARY migration endpoints (one-shot Render PG -> Supabase move,
-# 2026-10-02). Inert unless MIGRATE_TOKEN is set. Remove after the move.
-try:
-    import migrate_tmp  # noqa: E402
-    app.register_blueprint(migrate_tmp.bp)
-    print("[banaobot] migrate_tmp mounted at /__mig/")
-except Exception as exc:  # pragma: no cover
-    print(f"[banaobot] WARNING: migrate_tmp not loaded: {exc}")
-
 
 # ---------------------------------------------------------------------------
 # Outgoing messages
