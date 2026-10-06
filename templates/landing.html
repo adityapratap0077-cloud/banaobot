@@ -2,6 +2,7 @@
 
 {% block title %}BanaoBot — Describe your bot. It's ready.{% endblock %}
 
+
 {% block topbar_right %}
 <a href="/app/login" style="font-size:13px; text-decoration:none;">Log in &rarr;</a>
 {% endblock %}
@@ -13,7 +14,7 @@
     <h1>Describe your bot.<br><em>It's ready.</em></h1>
     <p class="hero-sub">
       Sign in, <strong>write one prompt</strong>, and your customers can chat with your
-      AI bot on <strong>WhatsApp</strong> tonight &mdash; no templates to pick through,
+      AI bot on <strong>WhatsApp</strong> tonight. No templates to pick through,
       no setup wizards, no code. Your café, your classes, your alter ego: if you can
       describe it, it can start answering questions. You never touch code.
     </p>
@@ -23,11 +24,25 @@
     </div>
     <div class="key-steps" aria-label="How to get your free API key">
       <span><b>1</b> Open Google AI Studio</span>
-      <span><b>2</b> Click &ldquo;Get API key&rdquo; &mdash; it&rsquo;s free</span>
+      <span><b>2</b> Click &ldquo;Get API key&rdquo; (free)</span>
       <span><b>3</b> Paste it in. Done in 60 seconds.</span>
     </div>
     <p class="hero-note">Free to start &middot; No card required &middot; Live in about a minute</p>
     <p class="hero-audience">Built for shop owners, teachers, and creators who&rsquo;d rather describe than configure.</p>
+  </div>
+</section>
+
+<section class="section demo-sec">
+  <div class="wrap">
+    <h2 style="font-size: clamp(1.9rem, 4.5vw, 2.8rem);">Try one right now.</h2>
+    <p class="demo-sub">This is <strong>Bhoj House</strong>, a sample restaurant bot built the same way, no signup needed. Ask it about the menu &rarr;</p>
+    <div class="demo-chat" id="demo-chat">
+      <div class="demo-log" id="demo-log" aria-live="polite"></div>
+      <form class="demo-form" id="demo-form">
+        <input id="demo-input" type="text" placeholder="Ask about the menu, hours, or booking a table&hellip;" aria-label="Message the demo bot" autocomplete="off" maxlength="500">
+        <button class="btn btn-accent" type="submit">Send</button>
+      </form>
+    </div>
   </div>
 </section>
 
@@ -84,4 +99,85 @@
     </nav>
   </div>
 </footer>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+(function(){
+  var log = document.getElementById('demo-log');
+  var form = document.getElementById('demo-form');
+  var input = document.getElementById('demo-input');
+  if (!form) return;
+  var phone = 'web-' + Math.random().toString(36).slice(2, 10);
+
+  function addMsg(text, who){
+    var div = document.createElement('div');
+    div.className = 'demo-msg demo-' + who;
+    var meta = document.createElement('span');
+    meta.className = 'demo-meta';
+    meta.textContent = who === 'user' ? 'You' : 'Bhoj House';
+    div.appendChild(meta);
+    String(text).split('\n').forEach(function(part, i){
+      if (i > 0) div.appendChild(document.createElement('br'));
+      div.appendChild(document.createTextNode(part.replace(/\*/g, '')));
+    });
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+  function addButtons(btns){
+    var wrap = document.createElement('div');
+    wrap.className = 'demo-btns';
+    btns.forEach(function(b){
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'demo-chip';
+      btn.textContent = (b.reply && b.reply.title) || 'Open';
+      btn.addEventListener('click', function(){ send(b.reply.id); });
+      wrap.appendChild(btn);
+    });
+    log.appendChild(wrap);
+    log.scrollTop = log.scrollHeight;
+  }
+  function send(text){
+    addMsg(text, 'user');
+    var typing = document.createElement('div');
+    typing.className = 'demo-msg demo-bot';
+    typing.textContent = '\u2026';
+    log.appendChild(typing);
+    log.scrollTop = log.scrollHeight;
+    fetch('/demo/message', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({phone: phone, text: text})
+    }).then(function(r){ if (!r.ok) throw new Error('bad status'); return r.json(); })
+    .then(function(data){
+      typing.remove();
+      var replies = (data && data.replies) || [];
+      if (!replies.length) addMsg('Hmm, the demo is waking up \u2014 try again in a moment.', 'bot');
+      replies.forEach(function(rep){
+        if (rep.type === 'text' && rep.text && rep.text.body) addMsg(rep.text.body, 'bot');
+        else if (rep.type === 'interactive' && rep.interactive){
+          var body = (rep.interactive.body && rep.interactive.body.text) || '';
+          if (body) addMsg(body, 'bot');
+          var btns = rep.interactive.action && rep.interactive.action.buttons;
+          if (btns && btns.length) addButtons(btns);
+        }
+      });
+    }).catch(function(){
+      typing.remove();
+      addMsg('Something went wrong. Please try again in a moment.', 'bot');
+    });
+  }
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    var t = input.value.trim();
+    if (!t) return;
+    input.value = '';
+    input.focus();
+    send(t);
+  });
+  addMsg('Namaste! I\u2019m the Bhoj House demo bot. Ask me about the menu, hours, or booking a table.', 'bot');
+})();
+</script>
 {% endblock %}
