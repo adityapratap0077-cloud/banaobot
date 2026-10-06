@@ -310,6 +310,12 @@ button.btn { font: inherit; font-family: var(--font-mono); }
   color: var(--ink-faint);
   margin-top: 22px;
 }
+.hero-audience {
+  font-size: 15px;
+  color: var(--ink-soft);
+  margin-top: 14px;
+  max-width: 34em;
+}
 
 /* Drop-cap style lede for editorial flavor */
 .lede::first-letter {
