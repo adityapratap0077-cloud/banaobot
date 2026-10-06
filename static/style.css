@@ -316,6 +316,28 @@ button.btn { font: inherit; font-family: var(--font-mono); }
   margin-top: 14px;
   max-width: 34em;
 }
+.key-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  margin-top: 22px;
+}
+.key-steps span {
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.key-steps b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  font-size: 12px;
+  margin-right: 8px;
+  color: var(--ink);
+}
 
 /* Drop-cap style lede for editorial flavor */
 .lede::first-letter {
