@@ -250,6 +250,46 @@ def index():
     return render_template("landing.html")
 
 
+@app.get("/robots.txt")
+def robots_txt():
+    text = """User-agent: *
+Allow: /
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+Sitemap: https://banaobot.onrender.com/sitemap.xml
+"""
+    return Response(text, mimetype="text/plain")
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml():
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://banaobot.onrender.com/</loc></url>
+  <url><loc>https://banaobot.onrender.com/app/login</loc></url>
+  <url><loc>https://banaobot.onrender.com/app/signup</loc></url>
+</urlset>
+"""
+    return Response(xml, mimetype="application/xml")
+
+
 # ---------------------------------------------------------------------------
 # Public share links: /b/<token> — anyone with the link can chat with the bot
 # ---------------------------------------------------------------------------
