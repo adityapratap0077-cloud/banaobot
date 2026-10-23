@@ -250,6 +250,11 @@ def index():
     return render_template("landing.html")
 
 
+@app.get("/privacy")
+def privacy():
+    return render_template("privacy.html")
+
+
 @app.get("/robots.txt")
 def robots_txt():
     text = """User-agent: *
@@ -285,9 +290,15 @@ def sitemap_xml():
   <url><loc>https://banaobot.onrender.com/</loc></url>
   <url><loc>https://banaobot.onrender.com/app/login</loc></url>
   <url><loc>https://banaobot.onrender.com/app/signup</loc></url>
+  <url><loc>https://banaobot.onrender.com/privacy</loc></url>
 </urlset>
 """
     return Response(xml, mimetype="application/xml")
+
+
+@app.errorhandler(404)
+def page_not_found(error):
+    return render_template("public_404.html"), 404
 
 
 # ---------------------------------------------------------------------------
