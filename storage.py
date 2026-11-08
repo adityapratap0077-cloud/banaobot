@@ -88,7 +88,20 @@ def get_conn(path="bot.db"):
             raise RuntimeError(
                 "DATABASE_URL is set but psycopg2 is not installed "
                 "(pip install psycopg2-binary)")
-        return psycopg2.connect(os.environ["DATABASE_URL"])
+        # Bounded connect + TCP keepalives (2026-11-08 outage fix): the
+        # bare connect() had no timeout, so a blackholed DB endpoint could
+        # block a sync gunicorn worker indefinitely, and without keepalives
+        # a half-open idle connection (pooler/compute suspends, NAT drops)
+        # hangs execute() until the OS TCP retransmit timeout (~15-30
+        # min). With keepalives the kernel errors a dead socket in ~90s,
+        # the request fails fast, and _ensure_live() reconnects on the
+        # next one. Client-side knobs only — pooler-agnostic.
+        return psycopg2.connect(
+            os.environ["DATABASE_URL"],
+            connect_timeout=10,
+            keepalives=1, keepalives_idle=60,
+            keepalives_interval=10, keepalives_count=3,
+        )
     conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
